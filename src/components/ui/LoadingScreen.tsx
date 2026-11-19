@@ -71,7 +71,7 @@ export const LoadingScreen: React.FC = () => {
     soundEngine.startAmbience();
     const appState = useAppStore.getState();
     soundEngine.setInPavilion(appState.cameraView === 'pavilion');
-    soundEngine.setWeatherIntensity(appState.weather);
+    soundEngine.setRainType(appState.rainType);
     useAppStore.setState({ isAudioPlaying: true });
 
     // 渐隐动画结束后彻底卸载

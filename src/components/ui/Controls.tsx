@@ -1,15 +1,11 @@
 import React from 'react';
 import { useAppStore } from '../../stores/useAppStore';
-import { CameraViewType, WeatherType } from '../../types';
+import { CameraViewType } from '../../types';
 import {
   Volume2,
   VolumeX,
   Compass,
   Music,
-  CloudRain,
-  Sun,
-  Moon,
-  CloudDrizzle,
   Move3d,
   Sliders,
 } from 'lucide-react';
@@ -23,18 +19,9 @@ const CAMERAS: { type: CameraViewType; label: string; icon?: React.ReactNode }[]
   { type: 'free', label: '自由漫游', icon: <Move3d size={13} /> },
 ];
 
-const WEATHERS: { type: WeatherType; label: string; icon: React.ReactNode }[] = [
-  { type: 'light', label: '微雨', icon: <CloudDrizzle size={14} /> },
-  { type: 'moderate', label: '细雨', icon: <CloudRain size={14} /> },
-  { type: 'dusk', label: '暮雨', icon: <Sun size={14} /> },
-  { type: 'night', label: '夜雨', icon: <Moon size={14} /> },
-];
-
 export const Controls: React.FC = () => {
   const cameraView = useAppStore((state) => state.cameraView);
   const setCameraView = useAppStore((state) => state.setCameraView);
-  const weather = useAppStore((state) => state.weather);
-  const setWeather = useAppStore((state) => state.setWeather);
   const isAudioPlaying = useAppStore((state) => state.isAudioPlaying);
   const toggleAudio = useAppStore((state) => state.toggleAudio);
   const isAutoRotate = useAppStore((state) => state.isAutoRotate);
@@ -98,16 +85,16 @@ export const Controls: React.FC = () => {
               ? 'text-emerald-300 border-emerald-500/50 bg-emerald-950/40 shadow-lg shadow-emerald-950/40'
               : 'text-stone-300 hover:text-white'
           }`}
-          title="打开境象调控面板 (调节缩放速度、光影与风雨)"
+          title="打开境象调控面板 (调节雨势等级、时辰天光与风雨参数)"
         >
           <Sliders size={14} className={isSettingsOpen ? 'text-emerald-400' : ''} />
           <span>调控</span>
         </button>
       </div>
 
-      {/* 2. 底部中央主控制台：机位切换与天气变换 */}
+      {/* 2. 底部中央主控制台：机位切换（雨势与时间已归集至右上角调控面板中） */}
       <div className="fixed bottom-5 inset-x-0 z-20 flex flex-col items-center justify-center gap-2 px-4 pointer-events-none">
-        <div className="flex flex-col sm:flex-row items-center gap-3">
+        <div className="flex items-center gap-3">
           {/* 机位选择 */}
           <div className="glass-panel p-1.5 rounded-full flex items-center gap-1 pointer-events-auto shadow-2xl">
             {CAMERAS.map((cam) => {
@@ -124,28 +111,6 @@ export const Controls: React.FC = () => {
                 >
                   {cam.icon}
                   <span>{cam.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* 天气时令调节 */}
-          <div className="glass-panel p-1.5 rounded-full flex items-center gap-1 pointer-events-auto shadow-2xl">
-            {WEATHERS.map((w) => {
-              const active = weather === w.type;
-              return (
-                <button
-                  key={w.type}
-                  onClick={() => setWeather(w.type)}
-                  className={`px-3 py-1.5 rounded-full text-xs flex items-center gap-1.5 transition-all ${
-                    active
-                      ? 'bg-stone-800 text-emerald-300 border border-stone-600/50'
-                      : 'text-stone-400 hover:text-stone-200'
-                  }`}
-                  title={w.label}
-                >
-                  {w.icon}
-                  <span>{w.label}</span>
                 </button>
               );
             })}

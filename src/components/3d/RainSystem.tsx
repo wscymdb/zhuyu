@@ -9,7 +9,7 @@ export const RainSystem: React.FC = () => {
   const eavesLinesRef = useRef<THREE.LineSegments>(null);
   const rippleMeshRef = useRef<THREE.InstancedMesh>(null);
 
-  const weather = useAppStore((state) => state.weather);
+  const rainType = useAppStore((state) => state.rainType);
   const rainIntensity = useAppStore((state) => state.config.rainIntensity);
 
   // 1. 真实全景雨丝线段系统 (适度优化数量，保障高帧率丝滑)
@@ -109,12 +109,21 @@ export const RainSystem: React.FC = () => {
   // 帧动画循环
   useFrame((_, delta) => {
     let speedMult = 1.0 * rainIntensity;
-    if (weather === 'light') speedMult = 0.7 * rainIntensity;
-    if (weather === 'moderate') speedMult = 1.0 * rainIntensity;
-    if (weather === 'dusk') speedMult = 0.85 * rainIntensity;
-    if (weather === 'night') speedMult = 0.75 * rainIntensity;
+    let slantX = -0.16;
 
-    const slantX = -0.16;
+    if (rainType === 'light') {
+      speedMult = 0.65 * rainIntensity;
+      slantX = -0.10;
+    } else if (rainType === 'moderate') {
+      speedMult = 1.0 * rainIntensity;
+      slantX = -0.16;
+    } else if (rainType === 'heavy') {
+      speedMult = 1.35 * rainIntensity;
+      slantX = -0.22;
+    } else if (rainType === 'storm') {
+      speedMult = 1.8 * rainIntensity;
+      slantX = -0.32;
+    }
 
     // A. 更新雨丝倾泻
     if (rainLinesRef.current) {
@@ -201,7 +210,15 @@ export const RainSystem: React.FC = () => {
         <lineBasicMaterial
           color="#dbebe3"
           transparent
-          opacity={weather === 'light' ? 0.38 : 0.58}
+          opacity={
+            rainType === 'light'
+              ? 0.35
+              : rainType === 'moderate'
+              ? 0.52
+              : rainType === 'heavy'
+              ? 0.68
+              : 0.82
+          }
           depthWrite={false}
           blending={THREE.AdditiveBlending}
         />

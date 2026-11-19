@@ -14,14 +14,14 @@ export const Stream: React.FC = () => {
   const boatRef = useRef<THREE.Group>(null);
   const waterNormalTex = useMemo(() => createWaterNormalTexture(), []);
 
-  const weather = useAppStore(state=>state.weather);
-  const brightness = useAppStore(state=>state.config.lightBrightness);
-  const reflection = useCubeCamera({resolution:128,near:0.1,far:65});
+  const timeOfDay = useAppStore((state) => state.timeOfDay);
+  const brightness = useAppStore((state) => state.config.lightBrightness);
+  const reflection = useCubeCamera({ resolution: 128, near: 0.1, far: 65 });
   const captured = useRef(false);
-  useLayoutEffect(()=>{
-    reflection.camera.position.set(getStreamCenterX(0),1.2,0);
-    captured.current=false;
-  },[reflection.camera,weather,brightness]);
+  useLayoutEffect(() => {
+    reflection.camera.position.set(getStreamCenterX(0), 1.2, 0);
+    captured.current = false;
+  }, [reflection.camera, timeOfDay, brightness]);
   useEffect(()=>{
     waterNormalTex.repeat.set(2.5,28);
     waterNormalTex.anisotropy=8;

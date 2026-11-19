@@ -188,14 +188,14 @@ function WetTraces({ environment }: { environment: THREE.Texture }) {
 
 export const ForestGround: React.FC = () => {
   const root = useRef<THREE.Group>(null);
-  const weather = useAppStore(state=>state.weather);
-  const brightness = useAppStore(state=>state.config.lightBrightness);
-  const reflection = useCubeCamera({resolution:128,near:0.1,far:65});
+  const timeOfDay = useAppStore((state) => state.timeOfDay);
+  const brightness = useAppStore((state) => state.config.lightBrightness);
+  const reflection = useCubeCamera({ resolution: 128, near: 0.1, far: 65 });
   const captured = useRef(false);
-  useLayoutEffect(()=>{
-    reflection.camera.position.set(2.2,1.6,5.1);
-    captured.current=false;
-  },[reflection.camera,weather,brightness]);
+  useLayoutEffect(() => {
+    reflection.camera.position.set(2.2, 1.6, 5.1);
+    captured.current = false;
+  }, [reflection.camera, timeOfDay, brightness]);
   // Capture the actual sky, pavilion and bamboo once per lighting change.
   // Reuse the probe for every wet patch, rather than rendering each puddle again.
   useFrame(()=>{

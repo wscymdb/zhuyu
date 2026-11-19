@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { WeatherType, CameraViewType, PoemItem } from '../types';
+import { RainType, TimeOfDayType, WeatherType, CameraViewType, PoemItem } from '../types';
 import { soundEngine } from '../utils/audioSynthesizer';
 
 export const POEMS: PoemItem[] = [
@@ -33,7 +33,7 @@ export interface AppConfig {
   zoomSpeed: number;        // 缩放速度 (0.1 ~ 1.5, 默认 0.4)
   rotateSpeed: number;      // 旋转速度 (0.2 ~ 1.5, 默认 0.7)
   moveSpeed: number;        // 漫游移动速度 (1 ~ 12, 默认 5.0)
-  rainIntensity: number;    // 雨水强度 (0.3 ~ 2.0, 默认 1.0)
+  rainIntensity: number;    // 雨水强度倍率 (0.3 ~ 2.0, 默认 1.0)
   windSpeed: number;        // 竹林风速 (0.2 ~ 2.5, 默认 1.0)
   fogDensity: number;       // 烟雨雾气浓度 (0.005 ~ 0.05, 默认 0.022)
   lightBrightness: number;  // 环境天光亮度 (0.5 ~ 2.5, 默认 1.2)
@@ -56,7 +56,18 @@ const DEFAULT_CONFIG: AppConfig = {
 };
 
 interface AppState {
+  // 雨势与时序
+  rainType: RainType;
+  timeOfDay: TimeOfDayType;
+  timeHour: number; // 0 ~ 24
+
+  // 动物叫声与音量
+  animalSound: string;
+  animalVolume: number; // 0.0 ~ 1.0
+
+  // 兼容旧属性
   weather: WeatherType;
+
   cameraView: CameraViewType;
   isAudioPlaying: boolean;
   isAutoRotate: boolean;
@@ -68,6 +79,11 @@ interface AppState {
   // 配置项
   config: AppConfig;
   
+  setRainType: (rainType: RainType) => void;
+  setTimeOfDay: (timeOfDay: TimeOfDayType) => void;
+  setTimeHour: (hour: number) => void;
+  setAnimalSound: (sound: string) => void;
+  setAnimalVolume: (volume: number) => void;
   setWeather: (weather: WeatherType) => void;
   setCameraView: (view: CameraViewType) => void;
   toggleAudio: () => void;
@@ -81,20 +97,64 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  weather: 'moderate',
+  rainType: 'light',
+  timeOfDay: 'day',
+  timeHour: 12,
+  animalSound: 'cuckoo',
+  animalVolume: 0.45,
+  weather: 'light',
+
   cameraView: 'pavilion',
   isAudioPlaying: false,
   isAutoRotate: false,
-  volume: 0.7,
+  volume: 0.85,
   currentPoemIndex: 0,
   showPoem: true,
   isSettingsOpen: false,
 
   config: { ...DEFAULT_CONFIG },
 
+  setRainType: (rainType: RainType) => {
+    set({ rainType, weather: rainType });
+    soundEngine.setRainType(rainType);
+  },
+
+  setAnimalSound: (animalSound: string) => {
+    set({ animalSound });
+    soundEngine.setAnimalSound(animalSound);
+  },
+
+  setAnimalVolume: (animalVolume: number) => {
+    set({ animalVolume });
+    soundEngine.setAnimalVolume(animalVolume);
+  },
+
+  setTimeOfDay: (timeOfDay: TimeOfDayType) => {
+    const hours: Record<TimeOfDayType, number> = {
+      dawn: 6,
+      day: 12,
+      dusk: 18.5,
+      night: 23,
+    };
+    set({ timeOfDay, timeHour: hours[timeOfDay] ?? 12 });
+  },
+
+  setTimeHour: (hour: number) => {
+    let tod: TimeOfDayType = 'day';
+    if (hour >= 5 && hour < 8.5) {
+      tod = 'dawn';
+    } else if (hour >= 8.5 && hour < 17) {
+      tod = 'day';
+    } else if (hour >= 17 && hour < 20) {
+      tod = 'dusk';
+    } else {
+      tod = 'night';
+    }
+    set({ timeHour: hour, timeOfDay: tod });
+  },
+
   setWeather: (weather) => {
-    set({ weather });
-    soundEngine.setWeatherIntensity(weather);
+    get().setRainType(weather as RainType);
   },
 
   setCameraView: (cameraView) => {
@@ -110,7 +170,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       soundEngine.startAmbience();
       soundEngine.setInPavilion(get().cameraView === 'pavilion');
-      soundEngine.setWeatherIntensity(get().weather);
+      soundEngine.setRainType(get().rainType);
       set({ isAudioPlaying: true });
     }
   },

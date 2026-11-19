@@ -5,6 +5,7 @@ import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useAppStore } from '../../stores/useAppStore';
 import { CameraViewType } from '../../types';
+import { soundEngine } from '../../utils/audioSynthesizer';
 
 interface ViewConfig {
   pos: [number, number, number];
@@ -45,6 +46,7 @@ export const CameraController: React.FC = () => {
   const targetPos = useRef(new THREE.Vector3(...VIEW_CONFIGS.pavilion.pos));
   const targetLook = useRef(new THREE.Vector3(...VIEW_CONFIGS.pavilion.target));
   const isTransitioning = useRef(false);
+  const lastInPavilion = useRef(true);
 
   // 监听键盘按键 (WASD / 方向键) 实现自由漫游行走
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -83,6 +85,14 @@ export const CameraController: React.FC = () => {
   useFrame((_, delta) => {
     const controls = controlsRef.current;
     if (!controls) return;
+
+    // 动态检测相机是否身处听雨亭内，实时无缝切换声学生态
+    const distToPavilion = Math.hypot(camera.position.x - 2.2, camera.position.z - 0.5);
+    const inPavilion = cameraView === 'pavilion' || (cameraView === 'free' && distToPavilion < 3.2);
+    if (lastInPavilion.current !== inPavilion) {
+      lastInPavilion.current = inPavilion;
+      soundEngine.setInPavilion(inPavilion);
+    }
 
     // 1. 处于预设机位过渡动画时：平滑插值移动
     if (isTransitioning.current && cameraView !== 'free') {
