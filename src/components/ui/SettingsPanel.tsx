@@ -1,3 +1,4 @@
+import { MAX_WATER_IMPACT_DENSITY } from '../../utils/rainWaterPresets';
 import React, { useState } from 'react';
 import { useAppStore } from '../../stores/useAppStore';
 import { RainType, TimeOfDayType } from '../../types';
@@ -25,6 +26,7 @@ import {
   Moon,
   Clock,
   Bird,
+  Zap,
 } from 'lucide-react';
 
 const ANIMAL_SOUNDS = [
@@ -34,9 +36,10 @@ const ANIMAL_SOUNDS = [
 
 const RAIN_OPTIONS: { type: RainType; label: string; desc: string; icon: React.ReactNode }[] = [
   { type: 'light', label: '小雨', desc: '轻柔 · 真实自然录音', icon: <CloudDrizzle size={13} /> },
-  { type: 'moderate', label: '中雨', desc: '潇潇 · 溪流潺潺', icon: <CloudRain size={13} /> },
+  { type: 'moderate', label: '中雨', desc: '潇潇 · 真实自然录音', icon: <CloudRain size={13} /> },
   { type: 'heavy', label: '大雨', desc: '密雨 · 敲竹鸣瓦', icon: <CloudRain size={13} /> },
-  { type: 'storm', label: '暴雨', desc: '骤雨 · 狂风微雷', icon: <CloudLightning size={13} /> },
+  { type: 'storm', label: '暴雨', desc: '骤雨 · 狂风呼啸', icon: <CloudLightning size={13} /> },
+  { type: 'thunder', label: '雷雨', desc: '电闪雷鸣 · 惊雷破空', icon: <Zap size={13} /> },
 ];
 
 const TIME_OPTIONS: { type: TimeOfDayType; label: string; desc: string; icon: React.ReactNode }[] = [
@@ -75,6 +78,7 @@ export const SettingsPanel: React.FC = () => {
   const toggleSettings = useAppStore((state) => state.toggleSettings);
   const config = useAppStore((state) => state.config);
   const setConfig = useAppStore((state) => state.setConfig);
+  const resetRainWaterPreset = useAppStore(state => state.resetRainWaterPreset);
   const resetConfig = useAppStore((state) => state.resetConfig);
   const volume = useAppStore((state) => state.volume);
   const setVolume = useAppStore((state) => state.setVolume);
@@ -269,7 +273,7 @@ export const SettingsPanel: React.FC = () => {
                 </div>
 
                 <div className="text-[10px] text-emerald-400/70 bg-emerald-950/20 p-2 rounded-lg border border-emerald-900/30">
-                  小雨专属播放《细雨》真实自然录音；中雨、大雨、暴雨采用多阶物理声学生成。
+                  小雨、中雨与雷雨播放对应的真实自然原声；大雨、暴雨采用多阶雨声合成。
                 </div>
               </div>
             )}
@@ -307,14 +311,14 @@ export const SettingsPanel: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-5 gap-1">
                     {RAIN_OPTIONS.map((opt) => {
                       const active = rainType === opt.type;
                       return (
                         <button
                           key={opt.type}
                           onClick={() => setRainType(opt.type)}
-                          className={`py-2 px-1 rounded-lg text-xs font-serif flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                          className={`py-2 px-0.5 rounded-lg text-xs font-serif flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
                             active
                               ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/50 shadow-md shadow-emerald-950/40'
                               : 'bg-stone-850/60 text-stone-400 hover:text-stone-200 border border-stone-800/80 hover:border-stone-700'
@@ -323,11 +327,34 @@ export const SettingsPanel: React.FC = () => {
                           <span className={active ? 'text-emerald-400' : 'text-stone-400'}>
                             {opt.icon}
                           </span>
-                          <span className="font-medium text-xs">{opt.label}</span>
+                          <span className="font-medium text-[11px]">{opt.label}</span>
                         </button>
                       );
                     })}
                   </div>
+                </div>
+
+                <div className="space-y-3 pt-3 border-t border-stone-800/40">
+                  <div className="flex justify-between items-center text-xs text-stone-300">
+                    <span>雨落溪面</span>
+                    <button onClick={resetRainWaterPreset} className="text-[10px] text-emerald-400 hover:text-emerald-200 cursor-pointer">恢复当前雨种水面预设</button>
+                  </div>
+                  {([
+                    { key: 'waterImpactStrength', label: '落水力度', max: 2, hint: '越大，落点凹陷越深、波峰与水花越明显' },
+                    { key: 'waterImpactDensity', label: '落点密度', max: MAX_WATER_IMPACT_DENSITY, hint: '越大，同一片水面上的涟漪越密集' },
+                  ] as const).map(({ key, label, max, hint }) => (
+                    <div key={key} className="space-y-1.5">
+                      <label htmlFor={key} className="flex justify-between text-xs text-stone-300">
+                        <span>{label}</span>
+                        <span className="text-emerald-300 font-mono text-[11px]">{config[key].toFixed(2)}x</span>
+                      </label>
+                      <input id={key} type="range" min="0" max={max} step="0.05" value={config[key]}
+                        onChange={e => setConfig(key, parseFloat(e.target.value))}
+                        className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-stone-800 rounded-lg appearance-none" />
+                      <p className="text-[10px] text-stone-500">{hint}</p>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-emerald-400/70">每种雨势单独记住调整；切换雨种或重新打开页面可复用。</p>
                 </div>
 
                 {/* B. 时辰天光选择：晨曦、白昼、暮色、子夜 */}

@@ -1,5 +1,5 @@
-// 雨势等级：小雨 (轻柔/细雨.mp3)、中雨 (潇潇细雨)、大雨 (密雨倾盆)、暴雨 (狂风骤雨)
-export type RainType = 'light' | 'moderate' | 'heavy' | 'storm';
+// 雨势等级：小雨 (轻柔/细雨.mp3)、中雨 (潇潇细雨)、大雨 (密雨倾盆)、暴雨 (狂风骤雨)、雷雨 (电闪雷鸣)
+export type RainType = 'light' | 'moderate' | 'heavy' | 'storm' | 'thunder';
 
 // 时辰天光：晨曦 (破晓)、白昼 (天青)、暮色 (霞光)、子夜 (月华)
 export type TimeOfDayType = 'dawn' | 'day' | 'dusk' | 'night';

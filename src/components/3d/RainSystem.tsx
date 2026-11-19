@@ -123,6 +123,9 @@ export const RainSystem: React.FC = () => {
     } else if (rainType === 'storm') {
       speedMult = 1.8 * rainIntensity;
       slantX = -0.32;
+    } else if (rainType === 'thunder') {
+      speedMult = 2.15 * rainIntensity;
+      slantX = -0.38;
     }
 
     // A. 更新雨丝倾泻
@@ -217,7 +220,9 @@ export const RainSystem: React.FC = () => {
               ? 0.52
               : rainType === 'heavy'
               ? 0.68
-              : 0.82
+              : rainType === 'storm'
+              ? 0.82
+              : 0.90
           }
           depthWrite={false}
           blending={THREE.AdditiveBlending}

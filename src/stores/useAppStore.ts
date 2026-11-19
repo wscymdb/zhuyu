@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { RAIN_WATER_PRESETS, MAX_WATER_IMPACT_DENSITY, readRainWaterPresets, saveRainWaterPresets, clampWaterSetting, type RainWaterSettings } from '../utils/rainWaterPresets';
 import { RainType, TimeOfDayType, WeatherType, CameraViewType, PoemItem } from '../types';
 import { soundEngine } from '../utils/audioSynthesizer';
 
@@ -29,7 +30,7 @@ export const POEMS: PoemItem[] = [
   }
 ];
 
-export interface AppConfig {
+export interface AppConfig extends RainWaterSettings {
   zoomSpeed: number;        // 缩放速度 (0.1 ~ 1.5, 默认 0.4)
   rotateSpeed: number;      // 旋转速度 (0.2 ~ 1.5, 默认 0.7)
   moveSpeed: number;        // 漫游移动速度 (1 ~ 12, 默认 5.0)
@@ -43,6 +44,7 @@ export interface AppConfig {
 }
 
 const DEFAULT_CONFIG: AppConfig = {
+  ...RAIN_WATER_PRESETS.light,
   zoomSpeed: 0.4,
   rotateSpeed: 0.7,
   moveSpeed: 5.0,
@@ -78,6 +80,8 @@ interface AppState {
 
   // 配置项
   config: AppConfig;
+  rainWaterPresets: Record<RainType, RainWaterSettings>;
+  resetRainWaterPreset: () => void;
   
   setRainType: (rainType: RainType) => void;
   setTimeOfDay: (timeOfDay: TimeOfDayType) => void;
@@ -96,6 +100,8 @@ interface AppState {
   resetConfig: () => void;
 }
 
+const savedWaterPresets = readRainWaterPresets();
+
 export const useAppStore = create<AppState>((set, get) => ({
   rainType: 'light',
   timeOfDay: 'day',
@@ -112,10 +118,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   showPoem: true,
   isSettingsOpen: false,
 
-  config: { ...DEFAULT_CONFIG },
+  config: { ...DEFAULT_CONFIG, ...savedWaterPresets.light },
+  rainWaterPresets: savedWaterPresets,
 
   setRainType: (rainType: RainType) => {
-    set({ rainType, weather: rainType });
+    set(state => ({ rainType, weather: rainType, config: { ...state.config, ...state.rainWaterPresets[rainType] } }));
     soundEngine.setRainType(rainType);
   },
 
@@ -199,15 +206,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setConfig: (key, value) => {
-    set((state) => ({
-      config: {
-        ...state.config,
-        [key]: value,
-      },
-    }));
+    const isWater = key === 'waterImpactStrength' || key === 'waterImpactDensity';
+    const nextValue = isWater ? clampWaterSetting(value, key === 'waterImpactStrength' ? 2 : MAX_WATER_IMPACT_DENSITY) : value;
+    set(state => {
+      const config = { ...state.config, [key]: nextValue };
+      if (!isWater) return { config };
+      const rainWaterPresets = { ...state.rainWaterPresets, [state.rainType]: {
+        waterImpactStrength: config.waterImpactStrength, waterImpactDensity: config.waterImpactDensity,
+      } };
+      saveRainWaterPresets(rainWaterPresets);
+      return { config, rainWaterPresets };
+    });
+  },
+
+  resetRainWaterPreset: () => {
+    const rain = get().rainType;
+    const preset = { ...RAIN_WATER_PRESETS[rain] };
+    const rainWaterPresets = { ...get().rainWaterPresets, [rain]: preset };
+    saveRainWaterPresets(rainWaterPresets);
+    set(state => ({ rainWaterPresets, config: { ...state.config, ...preset } }));
   },
 
   resetConfig: () => {
-    set({ config: { ...DEFAULT_CONFIG } });
+    const rainWaterPresets = structuredClone(RAIN_WATER_PRESETS);
+    saveRainWaterPresets(rainWaterPresets);
+    set({ rainWaterPresets, config: { ...DEFAULT_CONFIG, ...rainWaterPresets[get().rainType] } });
   },
 }));

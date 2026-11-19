@@ -1,6 +1,9 @@
 import React, { useMemo, useEffect } from 'react';
 import * as THREE from 'three';
 import { useTexture } from '@react-three/drei';
+import { useFrame } from '@react-three/fiber';
+import { STREAM_WATER_LEVEL } from '../../utils/terrain';
+import type { StreamDynamics } from '../../utils/streamDynamics';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export interface StreamRock {
@@ -28,16 +31,17 @@ function createRock(variant: number) {
   return geo;
 }
 
-function stoneMaterial(map: THREE.Texture) {
+function stoneMaterial(map: THREE.Texture, waterLevel: { value: number }) {
   const material=new THREE.MeshPhysicalMaterial({map,roughness:0.72,metalness:0,
     clearcoat:0.12,clearcoatRoughness:0.4,specularIntensity:0.6});
   material.onBeforeCompile=shader=>{
+    shader.uniforms.rockWaterLevel=waterLevel;
     shader.vertexShader='varying vec3 rockPosition;\nvarying vec3 rockNormal;\nvarying vec3 rockWorld;\n'+shader.vertexShader;
     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>
       rockPosition=position;
       rockNormal=normal;
       rockWorld=(modelMatrix*vec4(transformed,1.0)).xyz;`);
-    shader.fragmentShader='varying vec3 rockPosition;\nvarying vec3 rockNormal;\nvarying vec3 rockWorld;\n'+shader.fragmentShader;
+    shader.fragmentShader='uniform float rockWaterLevel;\nvarying vec3 rockPosition;\nvarying vec3 rockNormal;\nvarying vec3 rockWorld;\n'+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <map_pars_fragment>',`#include <map_pars_fragment>
       vec3 stoneSample(vec3 p,vec3 weights) {
         p=p*1.1+vec3(0.31,0.17,0.43);
@@ -47,7 +51,7 @@ function stoneMaterial(map: THREE.Texture) {
       vec3 rockWeights=pow(abs(normalize(rockNormal)),vec3(4.0));
       rockWeights/=max(dot(rockWeights,vec3(1.0)),0.0001);
       vec3 stone=stoneSample(rockPosition,rockWeights);
-      float waterline=1.0-smoothstep(-0.06,0.18,rockWorld.y);
+      float waterline=1.0-smoothstep(rockWaterLevel,rockWaterLevel+0.24,rockWorld.y);
       diffuseColor.rgb*=stone*mix(0.98,0.62,waterline);`);
     shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
       float height=dot(stone,vec3(0.299,0.587,0.114));
@@ -61,11 +65,11 @@ function stoneMaterial(map: THREE.Texture) {
     shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
       roughnessFactor=mix(0.76,0.43,waterline);`);
   };
-  material.customProgramCacheKey=()=> 'river-stone-triplanar-v1';
+  material.customProgramCacheKey=()=> 'river-stone-triplanar-v2';
   return material;
 }
 
-export const StreamRocks: React.FC<{rocks:StreamRock[]}>=({rocks})=>{
+export const StreamRocks: React.FC<{rocks:StreamRock[];dynamics:React.MutableRefObject<StreamDynamics>}>=({rocks,dynamics})=>{
   const textures=useTexture({stone:'/textures/rocks/river-stone-v1.png',moss:'/textures/rocks/moss-stone-v1.png'});
   useEffect(()=>{
     Object.values(textures).forEach(texture=>{
@@ -74,8 +78,10 @@ export const StreamRocks: React.FC<{rocks:StreamRock[]}>=({rocks})=>{
       texture.anisotropy=8; texture.needsUpdate=true;
     });
   },[textures]);
+  const waterLevel=useMemo(()=>({value:STREAM_WATER_LEVEL}),[]);
+  useFrame(()=>{waterLevel.value=STREAM_WATER_LEVEL+dynamics.current.levelRise;});
   const geometries=useMemo(()=>Array.from({length:6},(_,i)=>createRock(i)),[]);
-  const materials=useMemo(()=>[stoneMaterial(textures.stone),stoneMaterial(textures.moss)],[textures]);
+  const materials=useMemo(()=>[stoneMaterial(textures.stone,waterLevel),stoneMaterial(textures.moss,waterLevel)],[textures,waterLevel]);
   useEffect(()=>()=>{geometries.forEach(geo=>geo.dispose());materials.forEach(mat=>mat.dispose());},[geometries,materials]);
   return <group>{rocks.map((rock,i)=><mesh key={i} geometry={geometries[i%6]}
     material={materials[i%3===0?1:0]} position={[rock.x,rock.y,rock.z]} scale={rock.scale}
