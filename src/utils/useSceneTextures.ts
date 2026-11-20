@@ -23,6 +23,17 @@ export function useSceneTextures<T extends Record<string, string>>(input: T): Re
   const gl = useThree(state => state.gl);
   const textures = useLoader(SceneTextureLoader, Object.values(input));
   const keys = Object.keys(input).join('|');
-  useEffect(() => { textures.forEach(texture => gl.initTexture(texture)); }, [gl, textures]);
+  const urls = Object.values(input);
+  const signature = urls.join('\0');
+  useEffect(() => {
+    textures.forEach((texture, i) => {
+      gl.initTexture(texture);
+      // Cached hook results are already decoded too, even if no new request
+      // occurs (for example after a development refresh or scene remount).
+      if (useLoadingStore.getState().textures[urls[i]]?.status !== 'ready') {
+        useLoadingStore.getState().setTexture(urls[i], 'ready');
+      }
+    });
+  }, [gl, textures, signature]);
   return useMemo(() => Object.fromEntries(keys.split('|').map((key, i) => [key, textures[i]])) as Record<keyof T, THREE.Texture>, [keys, textures]);
 }

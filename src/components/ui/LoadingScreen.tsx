@@ -94,8 +94,8 @@ export const LoadingScreen: React.FC = () => {
         <div className={rowClass}><span className="text-stone-400">准备场景</span>
           <span className={sceneError ? 'text-red-300' : sceneReady ? 'text-emerald-300' : 'text-stone-300'}>{sceneError ? '绘制失败' : sceneReady ? '首帧已绘制' : texturesReady ? '绘制首帧中' : '等待贴图'}</span>
         </div>
-        <div className={rowClass}><span className="text-stone-400">{RAIN_LABELS[rainType]}雨声</span>
-          <span className={selectedAudio?.status === 'error' ? 'text-red-300' : audioReady ? 'text-emerald-300' : 'text-stone-300'}>{audioText}</span>
+        <div className={rowClass}><span className="text-stone-400">当前雨声</span>
+          <span className={selectedAudio?.status === 'error' ? 'text-red-300' : audioReady ? 'text-emerald-300' : 'text-stone-300'}>{RAIN_LABELS[rainType]} · {audioText}</span>
         </div>
       </div>
       <details className="w-full text-[11px] text-stone-500" open={textureErrors.length > 0 || !!sceneError}>
