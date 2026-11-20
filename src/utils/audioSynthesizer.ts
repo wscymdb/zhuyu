@@ -6,24 +6,26 @@
 // 【悠远山雀】：深山悠远布谷鸟鸣 (cuckoo.mp3)，空气吸声低通滤波 + 空间声像定位 + 轻柔弱音，呈现空谷回声之感
 
 import { RainType } from '../types';
+import { useLoadingStore, rainAudioKey } from '../stores/useLoadingStore';
 
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private isInitialized = false;
   private isPlaying = false;
+  private audioLoads = new Map<string, Promise<void>>();
+  private backgroundLoad: Promise<void> | null = null;
+  private cachedSynthRain: AudioBuffer | null = null;
+  private cachedStream: AudioBuffer | null = null;
 
   // 1. 真实录音音轨 (小雨模式专属使用 rain.mp3)
   private realRainBuffer: AudioBuffer | null = null;
-  private isPreloadingRealAudio = false;
   private moderateRainBuffer: AudioBuffer | null = null;
-  private isPreloadingModerateAudio = false;
   private realRainSource: AudioBufferSourceNode | null = null;
   private realRainGainNode: GainNode | null = null;
   private realRainFilterNode: BiquadFilterNode | null = null;
 
   // 2. 真实雷雨音轨 (雷雨模式专属使用 thunder.mp3 循环播放)
   private thunderBuffer: AudioBuffer | null = null;
-  private isPreloadingThunder = false;
   private thunderSource: AudioBufferSourceNode | null = null;
   private thunderGainNode: GainNode | null = null;
   private thunderFilterNode: BiquadFilterNode | null = null;
@@ -44,7 +46,6 @@ class SoundEngine {
 
   // 5. 悠远深山布谷鸟鸣 (cuckoo.mp3) 与动物鸣叫扩展
   private cuckooBuffer: AudioBuffer | null = null;
-  private isPreloadingCuckoo = false;
   private currentCuckooSource: AudioBufferSourceNode | null = null;
   private currentCuckooGain: GainNode | null = null;
   private cuckooTimer: number | null = null;
@@ -81,61 +82,45 @@ class SoundEngine {
 
     this.isInitialized = true;
 
-    // 立即预加载真实《细雨.mp3》、《雷雨.mp3》与悠远《布谷鸟.mp3》
-    this.preloadRealAudio();
-    this.preloadModerateAudio();
-    this.preloadThunderAudio();
-    this.preloadCuckooAudio();
   }
 
-  // 预加载真实《细雨.mp3》
-  public async preloadRealAudio() {
-    if (this.realRainBuffer || this.isPreloadingRealAudio) return;
-    if (!this.ctx) {
+  private loadAudio(url: string, install: (buffer: AudioBuffer) => void): Promise<void> {
+    const pending = this.audioLoads.get(url);
+    if (pending) return pending;
+    const job = (async () => {
+      useLoadingStore.getState().setAudio(url, 'loading');
       this.init();
-    }
-    if (!this.ctx) return;
-
-    this.isPreloadingRealAudio = true;
-    try {
-      const res = await fetch('/audio/rain.mp3');
-      if (res.ok) {
-        const arrayBuf = await res.arrayBuffer();
-        if (this.ctx) {
-          const decoded = await this.ctx.decodeAudioData(arrayBuf);
-          this.realRainBuffer = decoded;
-          // 若当前正在播放且当前选中小雨，即刻唤醒真实雨声音轨
-          if (this.isPlaying && this.currentRainType === 'light') {
-            this.setupRealRainSource();
-            this.updateAcoustics(0.4);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Real audio /audio/rain.mp3 fallback to synthetic sound:', e);
-    } finally {
-      this.isPreloadingRealAudio = false;
-    }
+      if (!this.ctx) throw new Error('浏览器无法初始化声音');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
+      const bytes = await response.arrayBuffer();
+      useLoadingStore.getState().setAudio(url, 'decoding');
+      const buffer = await this.ctx.decodeAudioData(bytes);
+      install(buffer);
+      useLoadingStore.getState().setAudio(url, 'ready');
+    })().catch(error => {
+      const message = error instanceof Error ? error.message : String(error);
+      useLoadingStore.getState().setAudio(url, 'error', message);
+      throw error;
+    }).finally(() => { this.audioLoads.delete(url); });
+    this.audioLoads.set(url, job);
+    return job;
   }
 
-  // 中雨录音复用真实雨声音轨及亭内外滤波，不叠加合成雨声。
-  public async preloadModerateAudio() {
-    if (this.moderateRainBuffer || this.isPreloadingModerateAudio) return;
-    if (!this.ctx) { this.init(); return; }
-    this.isPreloadingModerateAudio = true;
-    try {
-      const res = await fetch('/audio/moderate-rain.mp3');
-      if (!res.ok) throw new Error(`Moderate rain audio HTTP ${res.status}`);
-      this.moderateRainBuffer = await this.ctx.decodeAudioData(await res.arrayBuffer());
-      if (this.isPlaying && this.currentRainType === 'moderate') {
-        this.setupRealRainSource();
-        this.updateAcoustics(0.4);
-      }
-    } catch (error) {
-      console.warn('Moderate rain /audio/moderate-rain.mp3 fallback to synthetic sound:', error);
-    } finally {
-      this.isPreloadingModerateAudio = false;
-    }
+  public preloadRealAudio(): Promise<void> {
+    if (this.realRainBuffer) { useLoadingStore.getState().setAudio('/audio/rain.mp3','ready'); return Promise.resolve(); }
+    return this.loadAudio('/audio/rain.mp3', buffer => {
+      this.realRainBuffer = buffer;
+      if (this.isPlaying && this.currentRainType === 'light') { this.setupRealRainSource(); this.updateAcoustics(0.4); }
+    });
+  }
+
+  public preloadModerateAudio(): Promise<void> {
+    if (this.moderateRainBuffer) { useLoadingStore.getState().setAudio('/audio/moderate-rain.mp3','ready'); return Promise.resolve(); }
+    return this.loadAudio('/audio/moderate-rain.mp3', buffer => {
+      this.moderateRainBuffer = buffer;
+      if (this.isPlaying && this.currentRainType === 'moderate') { this.setupRealRainSource(); this.updateAcoustics(0.4); }
+    });
   }
 
   private getSelectedRainBuffer() {
@@ -144,59 +129,49 @@ class SoundEngine {
     return null;
   }
 
-  // 预加载真实雷雨录音 (thunder.mp3)
-  public async preloadThunderAudio() {
-    if (this.thunderBuffer || this.isPreloadingThunder) return;
-    if (!this.ctx) {
-      this.init();
-    }
-    if (!this.ctx) return;
+  public preloadThunderAudio(): Promise<void> {
+    if (this.thunderBuffer) { useLoadingStore.getState().setAudio('/audio/thunder.mp3','ready'); return Promise.resolve(); }
+    return this.loadAudio('/audio/thunder.mp3', buffer => {
+      this.thunderBuffer = buffer;
+      if (this.isPlaying && this.currentRainType === 'thunder') { this.setupThunderSource(); this.updateAcoustics(0.4); }
+    });
+  }
 
-    this.isPreloadingThunder = true;
+  public preloadCuckooAudio(): Promise<void> {
+    if (this.cuckooBuffer) return Promise.resolve();
+    return this.loadAudio('/audio/cuckoo.mp3', buffer => { this.cuckooBuffer = buffer; });
+  }
+
+  public async prepareRainAudio(rain: RainType): Promise<void> {
+    if (rain === 'light') return this.preloadRealAudio();
+    if (rain === 'moderate') return this.preloadModerateAudio();
+    if (rain === 'thunder') return this.preloadThunderAudio();
+    const key = rainAudioKey(rain);
     try {
-      const res = await fetch('/audio/thunder.mp3');
-      if (res.ok) {
-        const arrayBuf = await res.arrayBuffer();
-        if (this.ctx) {
-          const decoded = await this.ctx.decodeAudioData(arrayBuf);
-          this.thunderBuffer = decoded;
-          // 若当前正在播放且当前选定雷雨，即刻唤醒真实雷雨音轨
-          if (this.isPlaying && this.currentRainType === 'thunder') {
-            this.setupThunderSource();
-            this.updateAcoustics(0.4);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Thunder audio /audio/thunder.mp3 load failed:', e);
-    } finally {
-      this.isPreloadingThunder = false;
+      useLoadingStore.getState().setAudio(key, 'loading');
+      this.init();
+      if (!this.createSynthRainBuffer() || !this.createStreamBuffer()) throw new Error('浏览器无法准备雨声');
+      useLoadingStore.getState().setAudio(key, 'ready');
+    } catch (error) {
+      useLoadingStore.getState().setAudio(key, 'error', error instanceof Error ? error.message : String(error));
+      throw error;
     }
   }
 
-  // 预加载悠远深山布谷鸟啼鸣音源
-  public async preloadCuckooAudio() {
-    if (this.cuckooBuffer || this.isPreloadingCuckoo) return;
-    if (!this.ctx) {
-      this.init();
-    }
-    if (!this.ctx) return;
-
-    this.isPreloadingCuckoo = true;
-    try {
-      const res = await fetch('/audio/cuckoo.mp3');
-      if (res.ok) {
-        const arrayBuf = await res.arrayBuffer();
-        if (this.ctx) {
-          this.cuckooBuffer = await this.ctx.decodeAudioData(arrayBuf);
-        }
+  // Other rain recordings and birds do not hold up the first entry. Load them
+  // sequentially after entry, sharing any request already started by a switch.
+  public preloadBackgroundAudio(): Promise<void> {
+    if (this.backgroundLoad) return this.backgroundLoad;
+    this.backgroundLoad = (async () => {
+      for (const load of [() => this.preloadRealAudio(), () => this.preloadModerateAudio(),
+        () => this.preloadThunderAudio(), () => this.preloadCuckooAudio()]) {
+        await load().catch(() => { /* Per-file error remains visible in loading state. */ });
       }
-    } catch (e) {
-      console.warn('Cuckoo audio /audio/cuckoo.mp3 load failed:', e);
-    } finally {
-      this.isPreloadingCuckoo = false;
-    }
+    })();
+    return this.backgroundLoad;
   }
+
+  public isAudioRunning() { return this.isPlaying && this.ctx?.state === 'running'; }
 
   // 启动沉浸式环境音
   public async startAmbience() {
@@ -221,6 +196,7 @@ class SoundEngine {
     this.restartLoopers();
     this.startRandomDrips();
     this.startCuckooScheduler();
+    void this.preloadBackgroundAudio();
   }
 
   // 停止环境音
@@ -319,6 +295,7 @@ class SoundEngine {
 
   // 生成程序化粉红噪声缓冲
   private createSynthRainBuffer(): AudioBuffer | null {
+    if (this.cachedSynthRain) return this.cachedSynthRain;
     if (!this.ctx) return null;
     const bufferSize = this.ctx.sampleRate * 2;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -336,11 +313,13 @@ class SoundEngine {
       data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
       b6 = white * 0.115926;
     }
+    this.cachedSynthRain = buffer;
     return buffer;
   }
 
   // 生成流水白噪缓冲
   private createStreamBuffer(): AudioBuffer | null {
+    if (this.cachedStream) return this.cachedStream;
     if (!this.ctx) return null;
     const bufferSize = this.ctx.sampleRate * 2;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -348,6 +327,7 @@ class SoundEngine {
     for (let i = 0; i < bufferSize; i++) {
       data[i] = (Math.random() * 2 - 1) * 0.07;
     }
+    this.cachedStream = buffer;
     return buffer;
   }
 
@@ -867,6 +847,7 @@ class SoundEngine {
   // 切换雨势等级（小雨 / 中雨 / 大雨 / 暴雨 / 雷雨）
   public setRainType(type: RainType) {
     this.currentRainType = type;
+    if (this.isPlaying) void this.prepareRainAudio(type).catch(() => { /* Keep the existing synthetic fallback. */ });
     if (this.isPlaying && (type === 'light' || type === 'moderate') &&
         this.realRainSource?.buffer !== this.getSelectedRainBuffer()) {
       this.setupRealRainSource();
@@ -980,13 +961,3 @@ class SoundEngine {
 }
 
 export const soundEngine = new SoundEngine();
-
-// 页面加载阶段尽早预加载音频
-if (typeof window !== 'undefined') {
-  setTimeout(() => {
-    soundEngine.preloadRealAudio();
-    soundEngine.preloadModerateAudio();
-    soundEngine.preloadThunderAudio();
-    soundEngine.preloadCuckooAudio();
-  }, 100);
-}

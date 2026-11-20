@@ -5,8 +5,8 @@ import { useCubeCamera } from '@react-three/drei';
 import { useAppStore } from '../../stores/useAppStore';
 import { soundEngine } from '../../utils/audioSynthesizer';
 import { createWaterNormalTexture } from '../../utils/natureTextureGenerator';
-import { getTerrainHeight, getStreamCenterX, TERRAIN_SIZE, STREAM_SURFACE_HALF_WIDTH,
-  STREAM_CHANNEL_HALF_WIDTH, STREAM_WATER_LEVEL } from '../../utils/terrain';
+import { getTerrainHeight, getStreamCenterX, getStreamHalfWidth, getStreamFlowFactor, TERRAIN_SIZE, STREAM_SURFACE_HALF_WIDTH,
+  STREAM_WATER_LEVEL } from '../../utils/terrain';
 import { advanceStream, createStreamDynamics, getStreamConditions, getStreamSurfaceHeight,
   STREAM_WAVE_GLSL, type StreamDynamics } from '../../utils/streamDynamics';
 import { StreamRocks, type StreamRock } from './StreamRocks';
@@ -18,6 +18,11 @@ type DynamicsRef = React.MutableRefObject<StreamDynamics>;
 // millimetre waves have a trough and a crest, rather than a coloured ring.
 const STREAM_RAIN_GLSL = `
   float streamDropHash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+  float streamFlowNoise(vec2 p) {
+    vec2 cell=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
+    return mix(mix(streamDropHash(cell),streamDropHash(cell+vec2(1.0,0.0)),f.x),
+      mix(streamDropHash(cell+vec2(0.0,1.0)),streamDropHash(cell+vec2(1.0,1.0)),f.x),f.y);
+  }
   vec3 streamRainField(vec2 point) {
     float distanceFade=1.0-smoothstep(9.0,17.0,distance(point,cameraPosition.xz));
     if(distanceFade<0.001) return vec3(0.0);
@@ -76,7 +81,7 @@ const DriftingLeaves: React.FC<{ dynamics: DynamicsRef }> = ({ dynamics }) => {
     let seed = 2491;
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
     const colors = ['#5e784a', '#6f8057', '#576344', '#81744b', '#8a7d52'];
-    return Array.from({ length: 18 }, (_, i) => ({ z: -TERRAIN_SIZE / 2 + (i + 0.5) / 18 * TERRAIN_SIZE,
+    return Array.from({ length: 18 }, (_, i) => ({ z: -18 + (i + 0.5) / 18 * 36,
       across: (random() - 0.5) * 1.65, speed: 0.88 + random() * 0.24,
       angle: random() * Math.PI * 2, spin: (random() - 0.5) * 0.12,
       scale: 0.55 + random() * 0.35, color: colors[i % colors.length] }));
@@ -93,7 +98,7 @@ const DriftingLeaves: React.FC<{ dynamics: DynamicsRef }> = ({ dynamics }) => {
     if (!group.current) return;
     const state = dynamics.current, dt = Math.min(delta, 0.1);
     leaves.forEach((leaf, i) => {
-      leaf.z += dt * state.flowSpeed * leaf.speed;
+      leaf.z += dt * state.flowSpeed * leaf.speed * getStreamFlowFactor(leaf.z);
       if (leaf.z > TERRAIN_SIZE / 2 - 1) leaf.z = -TERRAIN_SIZE / 2 + 1;
       leaf.angle += dt * leaf.spin * (0.6 + state.rainImpact * 0.4);
       const x = getStreamCenterX(leaf.z) + leaf.across;
@@ -116,12 +121,12 @@ const RockWakes: React.FC<{ rocks: StreamRock[]; dynamics: DynamicsRef }> = ({ r
     const positions: number[] = [], uv: number[] = [], depths: number[] = [], indices: number[] = [];
     rocks.forEach(rock => {
       if (rock.y + rock.scale[1] < STREAM_WATER_LEVEL + 0.025 || rock.y - rock.scale[1] > STREAM_WATER_LEVEL) return;
-      const width = rock.scale[0] * 1.1, length = 0.35 + rock.scale[2] * 0.8;
+      const width = rock.scale[0] * 1.5, length = 0.75 + rock.scale[2] * 1.4;
       const startZ = rock.z + rock.scale[2] * 0.65;
       const offset = positions.length / 3;
       for (const [u, v] of [[-1, 0], [1, 0], [-1, 1], [1, 1]]) {
         const z = startZ + v * length;
-        const x = rock.x + (getStreamCenterX(z) - getStreamCenterX(startZ)) + u * width / 2;
+        const x = rock.x + (getStreamCenterX(z) - getStreamCenterX(startZ)) + u * width / 2 * (0.55 + v * 0.45);
         positions.push(x, STREAM_WATER_LEVEL + 0.003, z); uv.push(u, v);
         depths.push(STREAM_WATER_LEVEL - getTerrainHeight(x, z));
       }
@@ -142,13 +147,17 @@ const RockWakes: React.FC<{ rocks: StreamRock[]; dynamics: DynamicsRef }> = ({ r
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         wakeDepth=streamDepth+wakeLevel; wakeUv=uv;
         transformed.y+=wakeLevel+streamWave(position.xz,wakeDepth,wakeTravel,wakeHeight);`);
-      shader.fragmentShader = 'uniform float wakeTravel;\nuniform float wakeFoam;\nvarying vec2 wakeUv;\nvarying float wakeDepth;\n' + shader.fragmentShader;
+      shader.fragmentShader = `uniform float wakeTravel; uniform float wakeFoam; varying vec2 wakeUv; varying float wakeDepth;
+        float wakeHash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+        float wakeNoise(vec2 p) { vec2 c=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+          return mix(mix(wakeHash(c),wakeHash(c+vec2(1.,0.)),f.x),mix(wakeHash(c+vec2(0.,1.)),wakeHash(c+vec2(1.,1.)),f.x),f.y); }
+      ` + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-        float flecks=0.5+0.5*sin(wakeUv.x*33.0+sin(wakeUv.y*28.0-wakeTravel*18.0));
+        float flecks=wakeNoise(vec2(wakeUv.x*5.0,wakeUv.y*8.0-wakeTravel*6.0));
         float fade=(1.0-smoothstep(0.15,1.0,wakeUv.y))*(1.0-smoothstep(0.2,1.0,abs(wakeUv.x)));
-        diffuseColor.a=wakeFoam*0.48*fade*smoothstep(0.65,0.95,flecks)*smoothstep(0.005,0.07,wakeDepth);`);
+        diffuseColor.a=wakeFoam*0.72*fade*smoothstep(0.48,0.80,flecks)*smoothstep(0.005,0.07,wakeDepth);`);
     };
-    material.customProgramCacheKey = () => 'stream-local-rock-wakes-v1';
+    material.customProgramCacheKey = () => 'stream-local-rock-wakes-v2';
     return { material, uniforms };
   }, []);
   useFrame(() => {
@@ -158,7 +167,56 @@ const RockWakes: React.FC<{ rocks: StreamRock[]; dynamics: DynamicsRef }> = ({ r
     surface.material.opacity = state.foam;
   });
   useEffect(() => () => { geometry.dispose(); surface.material.dispose(); }, [geometry, surface]);
-  return <mesh geometry={geometry} material={surface.material} />;
+  return <mesh geometry={geometry} material={surface.material} renderOrder={2} />;
+};
+
+// Sparse advected glints make the downstream direction legible. All motion
+// stays on the GPU; distant rain ripples do not create additional CPU objects.
+const CurrentGlints: React.FC<{ dynamics: DynamicsRef }> = ({ dynamics }) => {
+  const timeOfDay = useAppStore(state => state.timeOfDay);
+  const objects = useMemo(() => {
+    const positions: number[] = [], uv: number[] = [], anchors: number[] = [], indices: number[] = [];
+    let seed = 421;
+    const random = () => { seed = (Math.imul(seed,1664525)+1013904223)>>>0; return seed/4294967296; };
+    for (let i=0;i<64;i++) {
+      const across=(random()-0.5)*1.2, z=(i+random())/64*TERRAIN_SIZE-TERRAIN_SIZE/2;
+      const speed=0.90+random()*0.25, width=0.018+random()*0.025, length=0.20+random()*0.42;
+      const start=positions.length/3;
+      for (const [u,v] of [[-1,0],[1,0],[-1,1],[1,1]]) {
+        positions.push(u*width,0,v*length); uv.push(u,v); anchors.push(across,z,speed);
+      }
+      indices.push(start,start+2,start+1,start+1,start+2,start+3);
+    }
+    const geo=new THREE.BufferGeometry();geo.setIndex(indices);
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+    geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+    geo.setAttribute('currentAnchor',new THREE.Float32BufferAttribute(anchors,3));geo.computeVertexNormals();
+    const travel={value:0},level={value:0},height={value:0};
+    const mat=new THREE.MeshBasicMaterial({color:'#a7bab0',transparent:true,opacity:0.12,depthWrite:false});
+    mat.onBeforeCompile=shader=>{
+      Object.assign(shader.uniforms,{currentTravel:travel,currentLevel:level,currentHeight:height});
+      shader.vertexShader=`uniform float currentTravel; uniform float currentLevel; uniform float currentHeight;
+        attribute vec3 currentAnchor; varying vec2 currentUv; varying float currentVisibility;
+        ${STREAM_WAVE_GLSL}`+shader.vertexShader;
+      shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`
+        float z=mod(currentAnchor.y+currentTravel*currentAnchor.z+42.5,85.0)-42.5+position.z;
+        float x=sin(z*0.2)*2.4-5.0+currentAnchor.x+position.x+sin(z*4.0+currentAnchor.y)*0.025;
+        vec3 transformed=vec3(x,${STREAM_WATER_LEVEL.toFixed(2)}+currentLevel+0.008+streamWave(vec2(x,z),0.4,currentTravel,currentHeight),z);
+        currentUv=uv;
+        currentVisibility=(1.0-smoothstep(10.0,18.0,distance(vec2(x,z),cameraPosition.xz)))*(1.0-step(42.45,abs(z)));`);
+      shader.fragmentShader='varying vec2 currentUv; varying float currentVisibility;\n'+shader.fragmentShader;
+      shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
+        float edge=1.0-smoothstep(0.3,1.0,abs(currentUv.x));
+        float endFade=pow(sin(currentUv.y*3.14159265),2.0);
+        diffuseColor.a*=edge*endFade*currentVisibility;`);
+    };
+    mat.customProgramCacheKey=()=> 'advected-creek-glints-v1';
+    return {geo,mat,travel,level,height};
+  },[]);
+  useEffect(()=>{objects.mat.color.set('#a7bab0').multiplyScalar(timeOfDay==='night'?0.2:timeOfDay==='dusk'?0.6:timeOfDay==='dawn'?0.75:1);},[objects,timeOfDay]);
+  useFrame(()=>{const s=dynamics.current;objects.travel.value=s.distance;objects.level.value=s.levelRise;objects.height.value=s.waveHeight;objects.mat.opacity=0.05+s.flowSpeed*0.10+s.foam*0.10;});
+  useEffect(()=>()=>{objects.geo.dispose();objects.mat.dispose();},[objects]);
+  return <mesh geometry={objects.geo} material={objects.mat} renderOrder={2} frustumCulled={false} />;
 };
 
 export const Stream: React.FC = () => {
@@ -191,10 +249,12 @@ export const Stream: React.FC = () => {
     const positions = geo.attributes.position, depths = new Float32Array(positions.count);
     const offsets = new Float32Array(positions.count);
     for (let i = 0; i < positions.count; i++) {
-      const z = positions.getZ(i), across = positions.getX(i), x = getStreamCenterX(z) + across;
+      const z = positions.getZ(i), unit = positions.getX(i) / STREAM_SURFACE_HALF_WIDTH;
+      const width = getStreamHalfWidth(z, unit < 0 ? -1 : 1);
+      const across = unit * width * 1.04, x = getStreamCenterX(z) + across;
       positions.setXYZ(i, x, STREAM_WATER_LEVEL, z);
       // Signed depth is essential: raising the water must not flood every dry vertex.
-      depths[i] = STREAM_WATER_LEVEL - getTerrainHeight(x, z); offsets[i] = across;
+      depths[i] = STREAM_WATER_LEVEL - getTerrainHeight(x, z); offsets[i] = across / width;
     }
     geo.setAttribute('streamDepth', new THREE.BufferAttribute(depths, 1));
     geo.setAttribute('channelOffset', new THREE.BufferAttribute(offsets, 1)); geo.computeVertexNormals();
@@ -204,11 +264,15 @@ export const Stream: React.FC = () => {
     let seed = 1823;
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
     for (let i = 0; i < 42; i++) {
-      const z = (random() - 0.5) * 32, x = getStreamCenterX(z) + (random() - 0.5) * 2.5;
-      const scale = 0.25 + random() * 0.5;
-      rockList.push({ x, z, y: getTerrainHeight(x, z) + 0.04,
-        scale: [scale, scale * (0.5 + random() * 0.4), scale * (0.8 + random() * 0.4)],
-        rot: [random() * 0.5, random() * Math.PI, random() * 0.5] });
+      const z = (random() - 0.5) * 32, side = random() < 0.5 ? -1 : 1;
+      const bankRock = i % 3 !== 0;
+      const across = bankRock ? side * getStreamHalfWidth(z, side) * (0.68 + random() * 0.22) : (random() - 0.5) * 1.65;
+      const x = getStreamCenterX(z) + across, bed = getTerrainHeight(x, z);
+      const scale = (bankRock ? 0.38 : 0.24) + random() * (bankRock ? 0.44 : 0.28);
+      const h = bankRock ? scale * (0.55 + random() * 0.3) : Math.max(scale * 0.6, (STREAM_WATER_LEVEL - bed + 0.07) / 1.65);
+      rockList.push({ x, z, y: bed + h * 0.65,
+        scale: [scale, h, scale * (0.8 + random() * 0.4)],
+        rot: [random() * 0.18, random() * Math.PI, random() * 0.18] });
     }
     return { waterGeo: geo, rocks: rockList };
   }, []);
@@ -216,7 +280,7 @@ export const Stream: React.FC = () => {
   const waterSurface = useMemo(() => {
     const uniforms = {
       time: { value: 0 }, travel: { value: 0 }, rain: { value: 0 }, coverage: { value: 0 },
-      height: { value: 0 }, level: { value: 0 }, turbidity: { value: 0 }, reflectionLight: { value: 1 },
+      height: { value: 0 }, level: { value: 0 }, turbidity: { value: 0 }, flow: { value: 0.32 }, reflectionLight: { value: 1 },
       shallow: { value: new THREE.Color('#83958b') }, deep: { value: new THREE.Color('#49655d') },
       muddyShallow: { value: new THREE.Color('#847b65') }, muddyDeep: { value: new THREE.Color('#5d6250') },
     };
@@ -227,7 +291,7 @@ export const Stream: React.FC = () => {
     material.onBeforeCompile = shader => {
       Object.assign(shader.uniforms, { streamTime: uniforms.time, streamTravel: uniforms.travel,
         rainImpact: uniforms.rain, rainCoverage: uniforms.coverage, waveHeight: uniforms.height,
-        levelRise: uniforms.level, turbidity: uniforms.turbidity, reflectionLight: uniforms.reflectionLight, riverShallow: uniforms.shallow,
+        levelRise: uniforms.level, streamFlow: uniforms.flow, turbidity: uniforms.turbidity, reflectionLight: uniforms.reflectionLight, riverShallow: uniforms.shallow,
         riverDeep: uniforms.deep, muddyShallow: uniforms.muddyShallow, muddyDeep: uniforms.muddyDeep });
       shader.vertexShader = 'uniform float streamTime;\nuniform float rainImpact;\nuniform float rainCoverage;\nuniform float streamTravel;\nuniform float waveHeight;\nuniform float levelRise;\nattribute float streamDepth;\nattribute float channelOffset;\nvarying float waterDepth;\nvarying float riverAcross;\nvarying vec3 streamWorld;\n' + STREAM_WAVE_GLSL + STREAM_RAIN_GLSL + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -235,20 +299,21 @@ export const Stream: React.FC = () => {
         transformed.y+=levelRise+streamWave(position.xz,waterDepth,streamTravel,waveHeight);
         transformed.y+=streamRainField(position.xz).z*smoothstep(0.015,0.09,waterDepth);
         streamWorld=(modelMatrix*vec4(transformed,1.0)).xyz;`);
-      shader.fragmentShader = 'uniform float reflectionLight;\nuniform float streamTime;\nuniform float streamTravel;\nuniform float rainImpact;\nuniform float rainCoverage;\nuniform float turbidity;\nuniform vec3 riverShallow;\nuniform vec3 riverDeep;\nuniform vec3 muddyShallow;\nuniform vec3 muddyDeep;\nvarying float waterDepth;\nvarying float riverAcross;\nvarying vec3 streamWorld;\n' + STREAM_RAIN_GLSL + shader.fragmentShader;
+      shader.fragmentShader = 'uniform float streamFlow;\nuniform float reflectionLight;\nuniform float streamTime;\nuniform float streamTravel;\nuniform float rainImpact;\nuniform float rainCoverage;\nuniform float turbidity;\nuniform vec3 riverShallow;\nuniform vec3 riverDeep;\nuniform vec3 muddyShallow;\nuniform vec3 muddyDeep;\nvarying float waterDepth;\nvarying float riverAcross;\nvarying vec3 streamWorld;\n' + STREAM_RAIN_GLSL + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
-        float depthAmount=smoothstep(0.0,0.34,max(0.0,waterDepth));
+        float depthAmount=smoothstep(0.0,0.75,max(0.0,waterDepth));
         vec3 shallow=mix(riverShallow,muddyShallow,turbidity);
         vec3 deep=mix(riverDeep,muddyDeep,turbidity);
         diffuseColor.rgb=mix(shallow,deep,depthAmount);
         vec3 rainField=streamRainField(streamWorld.xz);
         float across=streamWorld.x-(sin(streamWorld.z*0.2)*2.4-5.0);
-        float thread=pow(max(0.0,sin(across*34.0+sin((streamWorld.z-streamTravel)*1.4))),22.0);
-        float drift=pow(0.5+0.5*sin((streamWorld.z-streamTravel)*3.2+across*3.0),6.0);
-        diffuseColor.rgb+=vec3(0.012,0.014,0.012)*thread*drift*depthAmount;
+        vec2 flowPoint=vec2(across*14.0+sin(streamWorld.z*0.4)*0.6,(streamWorld.z-streamTravel)*1.8);
+        float flowNoise=streamFlowNoise(flowPoint);
+        float flowStreak=pow(smoothstep(0.60,0.93,flowNoise),5.0)*smoothstep(0.025,0.14,waterDepth);
+        diffuseColor.rgb+=vec3(0.018,0.023,0.020)*flowStreak;
         float disturbance=smoothstep(0.6,2.5,rainCoverage)*smoothstep(0.1,1.2,rainImpact);
         float alpha=mix(0.16,0.49,depthAmount)+turbidity*0.28+disturbance*0.10;
-        float bank=1.0-smoothstep(${(STREAM_CHANNEL_HALF_WIDTH - 0.08).toFixed(2)},${STREAM_CHANNEL_HALF_WIDTH.toFixed(2)},abs(riverAcross));
+        float bank=1.0-smoothstep(0.97,1.0,abs(riverAcross));
         diffuseColor.a=alpha*smoothstep(0.0,0.025,waterDepth)*bank;`);
       // Replace the native normal calculation, rather than applying a second perturbation to it.
       shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', `
@@ -272,11 +337,12 @@ export const Stream: React.FC = () => {
         float fresnel=0.035+0.965*pow(1.0-facing,5.0);
         float reflectionWeight=clamp(0.16+fresnel*0.65,0.0,0.65);
         outgoingLight=mix(outgoingLight,overcastReflection*reflectionLight,reflectionWeight);
+        outgoingLight+=vec3(0.045,0.055,0.048)*flowStreak*reflectionLight*(0.4+streamFlow);
         #include <opaque_fragment>`);
       shader.fragmentShader = shader.fragmentShader.replace('#include <clearcoat_normal_fragment_maps>', `#include <clearcoat_normal_fragment_maps>
         clearcoatNormal=normal;`);
     };
-    material.customProgramCacheKey = () => 'weather-responsive-stream-v10-dense-broken-splashes';
+    material.customProgramCacheKey = () => 'weather-responsive-stream-v11-winding-current';
     return { material, uniforms };
   }, [waterNormalTex, reflection.fbo.texture]);
   useEffect(() => () => { waterGeo.dispose(); waterSurface.material.dispose(); }, [waterGeo, waterSurface]);
@@ -287,7 +353,7 @@ export const Stream: React.FC = () => {
     const state = dynamics.current, u = waterSurface.uniforms;
     u.time.value = state.time; u.travel.value = state.distance; u.rain.value = state.waterImpactStrength;
     u.coverage.value = state.waterImpactDensity; u.height.value = state.waveHeight;
-    u.level.value = state.levelRise; u.turbidity.value = state.turbidity;
+    u.flow.value = state.flowSpeed; u.level.value = state.levelRise; u.turbidity.value = state.turbidity;
     const skyLight = timeOfDay === 'night' ? 0.10 : timeOfDay === 'dusk' ? 0.45 : timeOfDay === 'dawn' ? 0.65 : 1;
     u.reflectionLight.value = skyLight * THREE.MathUtils.clamp(brightness / 1.2, 0.25, 1.5);
     waterSurface.material.roughness = 0.20 + state.rainImpact * 0.08;
@@ -307,7 +373,7 @@ export const Stream: React.FC = () => {
       }
     }
     if (boatRef.current) {
-      let z = boatRef.current.position.z + Math.min(delta, 0.1) * state.flowSpeed;
+      let z = boatRef.current.position.z + Math.min(delta, 0.1) * state.flowSpeed * getStreamFlowFactor(boatRef.current.position.z);
       if (z > TERRAIN_SIZE / 2 - 1) z = -TERRAIN_SIZE / 2 + 1;
       const x = getStreamCenterX(z);
       boatRef.current.position.set(x, getStreamSurfaceHeight(x, z, state) + 0.045, z);
@@ -324,6 +390,7 @@ export const Stream: React.FC = () => {
     <group ref={floating}>
       <DriftingLeaves dynamics={dynamics} />
       <RockWakes rocks={rocks} dynamics={dynamics} />
+      <CurrentGlints dynamics={dynamics} />
       <StreamRainImpacts rocks={rocks} dynamics={dynamics} envMap={reflection.fbo.texture} />
     </group>
     <StreamRocks rocks={rocks} dynamics={dynamics} />

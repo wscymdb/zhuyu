@@ -16,10 +16,10 @@ export interface StreamDynamics extends StreamConditions, RainWaterSettings {
   distance: number;
 }
 const PROFILES: Record<Exclude<RainType, 'thunder'>, StreamConditions> = {
-  light: { rainImpact: 0.22, rainCoverage: 0.24, flowSpeed: 0.16, waveHeight: 0.003, turbidity: 0.04, levelRise: 0, foam: 0 },
-  moderate: { rainImpact: 0.44, rainCoverage: 0.48, flowSpeed: 0.23, waveHeight: 0.0042, turbidity: 0.15, levelRise: 0.006, foam: 0.025 },
-  heavy: { rainImpact: 0.72, rainCoverage: 0.73, flowSpeed: 0.34, waveHeight: 0.006, turbidity: 0.34, levelRise: 0.015, foam: 0.10 },
-  storm: { rainImpact: 1, rainCoverage: 0.94, flowSpeed: 0.48, waveHeight: 0.008, turbidity: 0.58, levelRise: 0.024, foam: 0.21 },
+  light: { rainImpact: 0.22, rainCoverage: 0.24, flowSpeed: 0.32, waveHeight: 0.007, turbidity: 0.04, levelRise: 0, foam: 0.045 },
+  moderate: { rainImpact: 0.44, rainCoverage: 0.48, flowSpeed: 0.48, waveHeight: 0.010, turbidity: 0.15, levelRise: 0.006, foam: 0.09 },
+  heavy: { rainImpact: 0.72, rainCoverage: 0.73, flowSpeed: 0.72, waveHeight: 0.014, turbidity: 0.34, levelRise: 0.015, foam: 0.17 },
+  storm: { rainImpact: 1, rainCoverage: 0.94, flowSpeed: 0.98, waveHeight: 0.018, turbidity: 0.58, levelRise: 0.024, foam: 0.28 },
 };
 const clamp = (value: number, lo: number, hi: number) => Math.max(lo, Math.min(value, hi));
 export function getStreamConditions(rain: RainType, intensity = 1): StreamConditions {
@@ -30,11 +30,11 @@ export function getStreamConditions(rain: RainType, intensity = 1): StreamCondit
     rainImpact: clamp(base.rainImpact * strength, 0.05, 1.3),
     rainCoverage: clamp(base.rainCoverage * Math.sqrt(strength), 0.1, 0.98),
     flowSpeed: base.flowSpeed * (0.75 + strength * 0.25),
-    waveHeight: Math.min(0.009, base.waveHeight * (0.75 + strength * 0.25)),
+    waveHeight: Math.min(0.022, base.waveHeight * (0.75 + strength * 0.25)),
     turbidity: Math.min(0.72, base.turbidity * (0.75 + strength * 0.25)),
     // The stream banks are shallow. Keep the rise below their lowest crest.
     levelRise: Math.min(0.024, base.levelRise * strength),
-    foam: Math.min(0.28, base.foam * strength),
+    foam: Math.min(0.36, base.foam * strength),
   };
 }
 export function createStreamDynamics(rain: RainType, intensity = 1, water = RAIN_WATER_PRESETS[rain]): StreamDynamics {

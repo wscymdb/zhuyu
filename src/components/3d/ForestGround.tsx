@@ -1,11 +1,13 @@
+import { useSceneTextures } from '../../utils/useSceneTextures';
 import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { useTexture, useCubeCamera } from '@react-three/drei';
+import { useCubeCamera } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { useAppStore } from '../../stores/useAppStore';
 import { PebblePath } from './PebblePath';
 import { createBambooLayout } from '../../utils/bambooLayout';
-import { getStreamCenterX, getTerrainHeight, PAVILION_POS, TERRAIN_SIZE } from '../../utils/terrain';
+import { createForestGroundGeometry } from '../../utils/forestGroundGeometry';
+import { getStreamCenterX, getTerrainHeight, GROUND_PUDDLES, PAVILION_POS } from '../../utils/terrain';
 
 function randomSource(seed: number) {
   return () => {
@@ -122,12 +124,8 @@ function LeafLitter() {
 function WetTraces({ environment }: { environment: THREE.Texture }) {
   const geometries = useMemo(() => {
     const random = randomSource(994);
-    // A handful of small irregular wet films beside the path and stream.
-    const centers = [[3.8,6.1,0.95,0.48],[1.9,8.7,0.7,0.4],[4.9,12.6,0.9,0.45],
-      [-0.2,6.4,0.8,0.43],[-2.7,-3.4,0.8,0.42],[0.3,13.5,0.7,0.4],
-      [7.0,7.3,1.1,0.58],[9.6,10.4,1.2,0.62],[5.7,4.9,0.7,0.43]];
-    return centers.map(([x,z,rx,rz]) => {
-      const positions = [x,getTerrainHeight(x,z)+0.028,z];
+    return GROUND_PUDDLES.map(({x,z,radiusX:rx,radiusZ:rz,level}) => {
+      const positions = [x,level+0.001,z];
       const indices: number[] = [];
       const uvs = [0.5,0.5];
       const radii=Array.from({length:24},()=>0.8+random()*0.2);
@@ -137,7 +135,7 @@ function WetTraces({ environment }: { environment: THREE.Texture }) {
         uvs.push(0.5+Math.cos(angle)*0.5,0.5+Math.sin(angle)*0.5);
         const px=x+Math.cos(angle)*rx*r;
         const pz=z+Math.sin(angle)*rz*r;
-        positions.push(px,getTerrainHeight(px,pz)+0.028,pz);
+        positions.push(px,level+0.001,pz);
         if(i>0) indices.push(0,i+1,i);
       }
       const geo=new THREE.BufferGeometry();
@@ -150,9 +148,9 @@ function WetTraces({ environment }: { environment: THREE.Texture }) {
   const surface = useMemo(() => {
     const time = { value: 0 };
     const material = new THREE.MeshPhysicalMaterial({
-      color:'#48493e', roughness:0.34, metalness:0, envMap:environment, envMapIntensity:0.4,
-      clearcoat:0.18, clearcoatRoughness:0.32, ior:1.33, specularIntensity:0.45,
-      transparent:true, opacity:0.64, depthWrite:false,
+      color:'#50594c', roughness:0.28, metalness:0, envMap:environment, envMapIntensity:0.30,
+      clearcoat:0.04, clearcoatRoughness:0.34, ior:1.33, specularIntensity:0.35,
+      transparent:true, opacity:0.58, depthWrite:false,
     });
     material.onBeforeCompile=shader=>{
       shader.uniforms.rainTime=time;
@@ -162,7 +160,11 @@ function WetTraces({ environment }: { environment: THREE.Texture }) {
         puddleUv=uv;`);
       shader.fragmentShader='uniform float rainTime;\nvarying vec3 puddleWorld;\nvarying vec2 puddleUv;\n'+shader.fragmentShader;
       shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
-        diffuseColor.a*=1.0-smoothstep(0.65,1.0,length((puddleUv-0.5)*2.0));`);
+        float edgeRadius=length((puddleUv-0.5)*2.0);
+        float grit=fract(sin(dot(floor(puddleWorld.xz*55.0),vec2(127.1,311.7)))*43758.5453);
+        float edge=1.0-smoothstep(0.85,1.0,edgeRadius+(grit-0.5)*0.14);
+        float grazing=1.0-abs(normalize(cameraPosition-puddleWorld).y);
+        diffuseColor.a*=edge*(0.35+0.65*pow(grazing,3.0));`);
       shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
         vec2 cell=floor(puddleWorld.xz*2.2);
         float seed=fract(sin(dot(cell,vec2(127.1,311.7)))*43758.5453);
@@ -170,14 +172,14 @@ function WetTraces({ environment }: { environment: THREE.Texture }) {
         float distanceToDrop=length(drop);
         float age=fract(rainTime*0.7+seed);
         float front=distanceToDrop-age*0.55;
-        float ring=sin(front*95.0)*exp(-front*front*220.0)*(1.0-age)*0.035;
+        float ring=sin(front*95.0)*exp(-front*front*220.0)*(1.0-age)*0.008;
         vec2 ripple=drop/max(distanceToDrop,0.01)*ring;
         ripple+=vec2(sin(puddleWorld.x*13.0+rainTime),cos(puddleWorld.z*11.0-rainTime))*0.003;
         normal=normalize(normal+(viewMatrix*vec4(ripple.x,0.0,ripple.y,0.0)).xyz);`);
       shader.fragmentShader=shader.fragmentShader.replace('#include <clearcoat_normal_fragment_maps>',`#include <clearcoat_normal_fragment_maps>
         clearcoatNormal=normal;`);
     };
-    material.customProgramCacheKey=()=> 'rain-puddle-v3';
+    material.customProgramCacheKey=()=> 'small-level-ground-puddles-v4';
     return {material,time};
   },[environment]);
   useFrame(state=>{surface.time.value=state.clock.elapsedTime;});
@@ -204,7 +206,7 @@ export const ForestGround: React.FC = () => {
     try { reflection.update(); captured.current=true; }
     finally { root.current.visible=true; }
   });
-  const pbr = useTexture({
+  const pbr = useSceneTextures({
     map:'/textures/ground/damp-soil-v1.png',
   });
   useEffect(() => {
@@ -214,18 +216,10 @@ export const ForestGround: React.FC = () => {
     });
     pbr.map.colorSpace=THREE.SRGBColorSpace;
   },[pbr]);
-  const geometry=useMemo(()=>{
-    const geo=new THREE.PlaneGeometry(TERRAIN_SIZE,TERRAIN_SIZE,192,192);
-    geo.rotateX(-Math.PI/2);
-    const positions=geo.attributes.position;
-    for(let i=0;i<positions.count;i++) positions.setY(i,getTerrainHeight(positions.getX(i),positions.getZ(i)));
-    geo.computeVertexNormals();
-    return geo;
-  },[]);
+  const geometry=useMemo(createForestGroundGeometry,[]);
   const material=useMemo(()=>{
-    const mat=new THREE.MeshPhysicalMaterial({map:pbr.map,bumpMap:pbr.map,bumpScale:0.025,
-      roughness:0.55,metalness:0,envMap:reflection.fbo.texture,envMapIntensity:0.32,
-      clearcoat:0.5,clearcoatRoughness:0.22});
+    const mat=new THREE.MeshStandardMaterial({map:pbr.map,bumpMap:pbr.map,bumpScale:0.035,
+      roughness:0.90,metalness:0,envMap:reflection.fbo.texture,envMapIntensity:0.06});
     mat.onBeforeCompile=shader=>{
       shader.uniforms.forestSoil={value:new THREE.Color('#65594b')};
       shader.uniforms.forestPath={value:new THREE.Color('#8a7d66')};
@@ -245,17 +239,11 @@ export const ForestGround: React.FC = () => {
         earth=mix(earth,forestMoss*(0.8+forestNoise(forestWorld.xz*13.0)*0.4),mossMask*0.62);
         diffuseColor.rgb=earth*mix(0.92,0.63,wetMask);`);
       shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
-        float rp,rm,rw,rn;
-        forestMasks(rp,rm,rw,rn);
-        roughnessFactor=mix(mix(0.63,0.55,rp),0.28,rw);
-        roughnessFactor=mix(roughnessFactor,0.88,rm*0.7);`);
-      shader.fragmentShader=shader.fragmentShader.replace('#include <lights_physical_fragment>',`#include <lights_physical_fragment>
-        float cp,cm,cw,cn;
-        forestMasks(cp,cm,cw,cn);
-        material.clearcoat=mix(0.08,0.55,cw)*(1.0-cm*0.8);
-        material.clearcoatRoughness=mix(0.38,0.2,cw);`);
+        roughnessFactor=mix(mix(0.94,0.85,pathMask),0.77,wetMask);
+        roughnessFactor=mix(roughnessFactor,0.98,mossMask*0.7);
+        roughnessFactor=clamp(roughnessFactor+(dot(earth,vec3(0.299,0.587,0.114))-0.25)*0.06,0.74,0.99);`);
     };
-    mat.customProgramCacheKey=()=> 'forest-wet-soil-v3';
+    mat.customProgramCacheKey=()=> 'rough-damp-soil-v4';
     return mat;
   },[pbr,reflection.fbo.texture]);
   useEffect(()=>()=>{geometry.dispose();material.dispose();},[geometry,material]);

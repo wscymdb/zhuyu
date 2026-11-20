@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getStreamCenterX, PAVILION_POS } from './terrain';
+import { getStreamCenterX, getStreamHalfWidth, PAVILION_POS } from './terrain';
 
 export const BAMBOO_COUNT = 580;
 
@@ -67,7 +67,7 @@ function getDesiredSpacing(
 
   // 5. 清溪流水主河床避让
   const streamCenterX = getStreamCenterX(z);
-  if (Math.abs(x - streamCenterX) < 2.4) return -1;
+  if (Math.abs(x - streamCenterX) < getStreamHalfWidth(z, x < streamCenterX ? -1 : 1) + 0.35) return -1;
 
   // 6. 密度场：
   let spacing = 1.15 * densityScale;

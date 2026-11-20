@@ -20,8 +20,8 @@ const VIEW_CONFIGS: Record<Exclude<CameraViewType, 'free'>, ViewConfig> = {
   },
   // 2. 临溪听泉 (置身溪畔石阶，近观清溪流淌)
   stream: {
-    pos: [-3.25, 1.8, -2.0],
-    target: [-5.2, -0.15, 1.4],
+    pos: [-1.9, 2.05, -3.8],
+    target: [-5.8, -0.1, 2.3],
   },
   // 3. 幽篁深处 (竹林缓坡仰望山林与木亭飞檐)
   bamboo: {

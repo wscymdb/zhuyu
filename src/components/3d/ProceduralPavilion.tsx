@@ -1,6 +1,7 @@
+import { useSceneTextures } from '../../utils/useSceneTextures';
 import React, { useMemo, useEffect } from 'react';
 import * as THREE from 'three';
-import { useTexture } from '@react-three/drei';
+
 
 const HALF_ROOF = 4.15;
 const EAVE_Y = 3.6;
@@ -72,13 +73,13 @@ function Beam({ from, to, width = 0.14, depth = width, color = '#655044' }: {
 }
 
 export const ProceduralPavilion: React.FC = () => {
-  const floor = useTexture({
+  const floor = useSceneTextures({
     map: '/textures/pavilion/floor-color.jpg',
     normalMap: '/textures/pavilion/floor-normal.jpg',
     roughnessMap: '/textures/pavilion/floor-roughness.jpg',
     aoMap: '/textures/pavilion/floor-ao.jpg',
   });
-  const tiles = useTexture({
+  const tiles = useSceneTextures({
     map: '/textures/pavilion/roof-color.jpg',
     normalMap: '/textures/pavilion/roof-normal.jpg',
     roughnessMap: '/textures/pavilion/roof-roughness.jpg',

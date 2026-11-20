@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { useFrame } from '@react-three/fiber';
-import { getStreamCenterX, getTerrainHeight, STREAM_WATER_LEVEL } from '../../utils/terrain';
+import { getStreamCenterX, getStreamHalfWidth, getTerrainHeight, STREAM_WATER_LEVEL } from '../../utils/terrain';
 import type { StreamRock } from './StreamRocks';
 
 function colored(geo: THREE.BufferGeometry,color: string) {
@@ -68,7 +68,7 @@ function FishSchools({rocks}:{rocks:StreamRock[]}) {
       }
     }
     const center=getStreamCenterX(z);
-    x=THREE.MathUtils.clamp(x,center-1.05,center+1.05);
+    x=THREE.MathUtils.clamp(x,center-Math.min(1.05,getStreamHalfWidth(z,-1)*0.65),center+Math.min(1.05,getStreamHalfWidth(z,1)*0.65));
     const bed=getTerrainHeight(x,z);
     result.set(x,Math.min(STREAM_WATER_LEVEL-0.05,bed+0.12+Math.sin(time*0.8+i)*0.018),z);
   }
@@ -139,7 +139,7 @@ function BottomShrimp({rocks}:{rocks:StreamRock[]}) {
     for(const rock of rocks) {
       for(const side of [-1,1]) {
         const x=rock.x+side*(rock.scale[0]+0.13),z=rock.z+0.12;
-        if(getTerrainHeight(x,z)>STREAM_WATER_LEVEL-0.09 || Math.abs(x-getStreamCenterX(z))>1.3) continue;
+        if(getTerrainHeight(x,z)>STREAM_WATER_LEVEL-0.09 || Math.abs(x-getStreamCenterX(z))>getStreamHalfWidth(z,x<getStreamCenterX(z)?-1:1)*0.7) continue;
         list.push({x,z,angle:list.length*1.8});
         if(list.length===8)return list;
       }

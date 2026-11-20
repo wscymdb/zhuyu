@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { useAppStore } from '../../stores/useAppStore';
-import { getStreamCenterX, getTerrainHeight, STREAM_WATER_LEVEL, TERRAIN_SIZE } from '../../utils/terrain';
+import { getStreamCenterX, getStreamHalfWidth, getTerrainHeight, STREAM_WATER_LEVEL, TERRAIN_SIZE } from '../../utils/terrain';
 import { getStreamSurfaceHeight, type StreamDynamics } from '../../utils/streamDynamics';
 import type { StreamRock } from './StreamRocks';
 
-const POOL_SIZE = 256;
+const POOL_SIZE = 160;
+const NEAR_SPLASH_RADIUS = 4.5;
 const DROPLETS_PER_IMPACT = 4;
 interface Impact {
   born: number; z: number; across: number; duration: number;
@@ -107,26 +108,42 @@ export const StreamRainImpacts: React.FC<{
     objects.crownMaterial.color.set('#708f82').multiplyScalar(light);
     objects.skyBrightness.value = light;
   }, [objects, timeOfDay]);
+  const rockCells = useMemo(() => {
+    const cells = new Map<string, StreamRock[]>();
+    for (const rock of rocks) {
+      for (let ix = Math.floor((rock.x - (rock.scale[0] + 0.055) * 1.05) / 2); ix <= Math.floor((rock.x + (rock.scale[0] + 0.055) * 1.05) / 2); ix++) {
+        for (let iz = Math.floor((rock.z - (rock.scale[2] + 0.055) * 1.05) / 2); iz <= Math.floor((rock.z + (rock.scale[2] + 0.055) * 1.05) / 2); iz++) {
+          const key = `${ix},${iz}`, entries = cells.get(key) ?? [];
+          entries.push(rock); cells.set(key, entries);
+        }
+      }
+    }
+    return cells;
+  }, [rocks]);
+  const forward = useMemo(() => new THREE.Vector3(), []);
   const pose = useMemo(() => new THREE.Object3D(), []);
   useFrame(({ camera }) => {
     if (!spray.current || !crowns.current) return;
     const state = dynamics.current;
     const dt = state.time - lastUpdate.current;
-    if (lastUpdate.current >= 0 && dt < 1 / 45) return;
+    if (lastUpdate.current >= 0 && dt < 1 / 30 - 0.000001) return;
     lastUpdate.current = state.time;
+    camera.getWorldDirection(forward);
     const nearStream = Math.abs(camera.position.x - getStreamCenterX(camera.position.z)) < 10;
-    budget.current += nearStream ? Math.min(dt, 0.1) * (state.waterImpactDensity * 210) : 0;
-    budget.current = Math.min(budget.current, 48);
+    budget.current += nearStream ? Math.min(dt, 0.1) * (state.waterImpactDensity * 90) : 0;
+    budget.current = Math.min(budget.current, 24);
     while (budget.current >= 1) {
       budget.current -= 1;
       let point: { x: number; z: number; across: number } | null = null;
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const z = camera.position.z + (random() - 0.5) * 10;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const z = camera.position.z + (random() - 0.5) * (NEAR_SPLASH_RADIUS * 2);
         if (Math.abs(z) > TERRAIN_SIZE / 2 - 0.25) continue;
-        const across = (random() - 0.5) * 3.3, x = getStreamCenterX(z) + across;
-        if ((x - camera.position.x) ** 2 + (z - camera.position.z) ** 2 > 7.5 ** 2) continue;
+        const side = random() < 0.5 ? -1 : 1;
+        const across = random() * getStreamHalfWidth(z, side) * 0.75 * side, x = getStreamCenterX(z) + across;
+        if ((x - camera.position.x) ** 2 + (z - camera.position.z) ** 2 > NEAR_SPLASH_RADIUS ** 2) continue;
+        if ((x - camera.position.x) * forward.x + (z - camera.position.z) * forward.z < -0.75) continue;
         if (STREAM_WATER_LEVEL + state.levelRise - getTerrainHeight(x, z) < 0.035) continue;
-        const blocked = rocks.some(rock => {
+        const blocked = rockCells.get(`${Math.floor(x / 2)},${Math.floor(z / 2)}`)?.some(rock => {
           const dx = (x - rock.x) / (rock.scale[0] + 0.055), dz = (z - rock.z) / (rock.scale[2] + 0.055);
           return dx * dx + dz * dz < 1.1 && rock.y + rock.scale[1] > STREAM_WATER_LEVEL + state.levelRise;
         });
@@ -147,7 +164,7 @@ export const StreamRainImpacts: React.FC<{
       if (age < 0 || age > item.duration) continue;
       const z = item.z + age * state.flowSpeed * 0.22;
       const x = getStreamCenterX(z) + item.across;
-      if ((x - camera.position.x) ** 2 + (z - camera.position.z) ** 2 > 9 ** 2) continue;
+      if ((x - camera.position.x) ** 2 + (z - camera.position.z) ** 2 > NEAR_SPLASH_RADIUS ** 2) continue;
       const h = getStreamSurfaceHeight(x, z, state);
       if (item.splash && item.strength > 0.01 && age < 0.10 + item.seed * 0.07) {
         const phase = age / (0.10 + item.seed * 0.07);
@@ -162,7 +179,7 @@ export const StreamRainImpacts: React.FC<{
         objects.shape.setXY(crownCount, item.seed, phase);
         objects.visibility.setX(crownCount++, Math.min(1, phase * 12) * (1 - phase * phase));
       }
-      if (item.splash && age < 0.24 && (x - camera.position.x) ** 2 + (z - camera.position.z) ** 2 < 6 ** 2) {
+      if (item.splash && age < 0.24 && (x - camera.position.x) ** 2 + (z - camera.position.z) ** 2 < NEAR_SPLASH_RADIUS ** 2) {
         for (let particle = 0; particle < DROPLETS_PER_IMPACT; particle++) {
           const velocity = (0.52 + ((item.seed * 7 + particle * 0.37) % 1) * 0.38) * Math.sqrt(item.strength), elevation = velocity * age - 4.9 * age * age;
           if (elevation <= 0) continue;

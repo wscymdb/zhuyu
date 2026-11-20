@@ -1,258 +1,111 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { useAppStore } from '../../stores/useAppStore';
-import { getTerrainHeight, PAVILION_POS } from '../../utils/terrain';
+import { getTerrainHeight, getStreamCenterX, getStreamHalfWidth, PAVILION_POS } from '../../utils/terrain';
+
+const RAIN_COUNT = 3800, EAVES_COUNT = 120, RIPPLE_COUNT = 160;
+const WEATHER = {
+  light: { speed: 0.65, slant: -0.10, opacity: 0.35 },
+  moderate: { speed: 1, slant: -0.16, opacity: 0.48 },
+  heavy: { speed: 1.35, slant: -0.22, opacity: 0.60 },
+  storm: { speed: 1.8, slant: -0.32, opacity: 0.72 },
+  thunder: { speed: 2.15, slant: -0.38, opacity: 0.76 },
+};
 
 export const RainSystem: React.FC = () => {
-  const rainLinesRef = useRef<THREE.LineSegments>(null);
-  const eavesLinesRef = useRef<THREE.LineSegments>(null);
-  const rippleMeshRef = useRef<THREE.InstancedMesh>(null);
-
-  const rainType = useAppStore((state) => state.rainType);
-  const rainIntensity = useAppStore((state) => state.config.rainIntensity);
-
-  // 1. 真实全景雨丝线段系统 (适度优化数量，保障高帧率丝滑)
-  const rainStreakCount = 3800;
-  const { lineGeo, rainData } = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-    const positions = new Float32Array(rainStreakCount * 2 * 3);
-    const data: {
-      x: number;
-      y: number;
-      z: number;
-      length: number;
-      speed: number;
-    }[] = [];
-
-    const slantX = -0.16; // 随微风自然倾斜
-
-    for (let i = 0; i < rainStreakCount; i++) {
-      const x = (Math.random() - 0.5) * 45;
-      const y = Math.random() * 24;
-      const z = (Math.random() - 0.5) * 45;
-      const len = 0.6 + Math.random() * 0.45;
-      const spd = 28 + Math.random() * 14;
-
-      data.push({ x, y, z, length: len, speed: spd });
-
-      const idx = i * 6;
-      // 头部
-      positions[idx] = x;
-      positions[idx + 1] = y;
-      positions[idx + 2] = z;
-      // 尾部拉长为细雨丝
-      positions[idx + 3] = x - slantX * len;
-      positions[idx + 4] = y + len;
-      positions[idx + 5] = z;
+  const rippleMesh = useRef<THREE.InstancedMesh>(null);
+  const rainType = useAppStore(state => state.rainType);
+  const intensity = useAppStore(state => state.config.rainIntensity);
+  const objects = useMemo(() => {
+    const travel = { value: 0 }, windTravel = { value: 0 }, slant = { value: -0.1 };
+    const geometry = new THREE.BufferGeometry();
+    const origins: number[] = [], motion: number[] = [], positions: number[] = [];
+    for (let i = 0; i < RAIN_COUNT + EAVES_COUNT; i++) {
+      const eaves = i >= RAIN_COUNT;
+      let x = (Math.random() - 0.5) * 45, z = (Math.random() - 0.5) * 45, top = 25;
+      if (eaves) {
+        const angle = Math.floor(Math.random() * 4) * Math.PI / 2, t = Math.random() * 2 - 1;
+        x = PAVILION_POS[0] + 4.15 * (t * Math.cos(angle) + Math.sin(angle));
+        z = PAVILION_POS[2] + 4.15 * (Math.cos(angle) - t * Math.sin(angle));
+        top = 3.61 + 0.2 * Math.pow(Math.abs(t), 6);
+      }
+      const speed = eaves ? 8.5 + Math.random() * 4 : 28 + Math.random() * 14;
+      const length = eaves ? 0.035 + Math.random() * 0.045 : 0.10 + Math.random() * 0.13;
+      const phase = Math.random();
+      for (let end = 0; end < 2; end++) {
+        positions.push(0, end, 0); origins.push(x, top, z);
+        motion.push(speed, length, phase, eaves ? 1 : 0);
+      }
     }
-
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    return { lineGeo: geo, rainData: data };
-  }, [rainStreakCount]);
-
-  // 2. 真实屋檐水帘滴落系统：改用微型流线短水丝 (Micro Line Segments)，彻底告别粗笨的白方块！
-  const eavesDripCount = 120;
-  const { eavesLineGeo, eavesData } = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-    const positions = new Float32Array(eavesDripCount * 2 * 3);
-    const data: { x: number; y: number; z: number; speed: number; originY: number; len: number }[] = [];
-
-    for (let i = 0; i < eavesDripCount; i++) {
-      const edge = Math.floor(Math.random() * 4);
-      const t = Math.random() * 2 - 1;
-      const angle = edge * Math.PI / 2;
-      const x = PAVILION_POS[0] + 4.15 * (t * Math.cos(angle) + Math.sin(angle));
-      const z = PAVILION_POS[2] + 4.15 * (Math.cos(angle) - t * Math.sin(angle));
-      const originY = 3.6 + 0.07 + 0.2 * Math.pow(Math.abs(t), 6) - 0.06;
-      const y = originY - Math.random() * 3.2;
-      const len = 0.12 + Math.random() * 0.12; // 短水滴尾迹
-
-      data.push({ x, y, z, speed: 8.5 + Math.random() * 4.0, originY, len });
-
-      const idx = i * 6;
-      positions[idx] = x;
-      positions[idx + 1] = y;
-      positions[idx + 2] = z;
-
-      positions[idx + 3] = x;
-      positions[idx + 4] = y + len; // 垂直水帘短线
-      positions[idx + 5] = z;
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('rainOrigin', new THREE.Float32BufferAttribute(origins, 3));
+    geometry.setAttribute('rainMotion', new THREE.Float32BufferAttribute(motion, 4));
+    const material = new THREE.LineBasicMaterial({ color: '#dbebe3', transparent: true, opacity: 0.48, depthWrite: false });
+    material.onBeforeCompile = shader => {
+      Object.assign(shader.uniforms, { rainTravel: travel, rainWindTravel: windTravel, rainSlant: slant });
+      shader.vertexShader = `uniform float rainTravel; uniform float rainWindTravel; uniform float rainSlant;
+        attribute vec3 rainOrigin; attribute vec4 rainMotion; varying float rainVisibility;\n` + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+        float eaves=rainMotion.w;
+        float headY=rainOrigin.y-mod(rainMotion.z*rainOrigin.y+rainTravel*rainMotion.x,rainOrigin.y);
+        float x=mix(mod(rainOrigin.x+rainWindTravel*rainMotion.x+22.5,45.0)-22.5,rainOrigin.x,eaves);
+        float localX=abs(x-${PAVILION_POS[0].toFixed(2)}),localZ=abs(rainOrigin.z-${PAVILION_POS[2].toFixed(2)});
+        float radius=max(localX,localZ)/4.15;
+        float corner=min(localX,localZ)/max(0.001,max(localX,localZ));
+        float roofY=3.6+1.9*pow(max(0.0,1.0-radius),1.45)+pow(min(radius,1.0),5.0)*(0.07+0.2*pow(corner,6.0));
+        float sheltered=(1.0-step(1.0,radius))*(1.0-step(roofY+0.03,headY));
+        rainVisibility=(1.0-sheltered*(1.0-eaves))*step(0.05,headY);
+        vec3 head=vec3(x,headY,rainOrigin.z);
+        rainVisibility*=smoothstep(0.5,1.3,distance(head,cameraPosition));
+        vec3 transformed=head+vec3(-rainSlant*(1.0-eaves),1.0,0.0)*rainMotion.y*position.y;
+      `);
+      shader.fragmentShader = 'varying float rainVisibility;\n' + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.a*=rainVisibility;');
+    };
+    material.customProgramCacheKey = () => 'gpu-short-rain-v1';
+    const rippleGeometry = new THREE.RingGeometry(0.02, 0.07, 18); rippleGeometry.rotateX(-Math.PI / 2);
+    const rippleMotion = new Float32Array(RIPPLE_COUNT * 3), centers: THREE.Vector3[] = [];
+    for (let i = 0; i < RIPPLE_COUNT; i++) {
+      const x = (Math.random() - 0.5) * 38, z = (Math.random() - 0.5) * 38;
+      const hidden = (Math.abs(x - PAVILION_POS[0]) < 4.15 && Math.abs(z - PAVILION_POS[2]) < 4.15)
+        || Math.abs(x - getStreamCenterX(z)) < getStreamHalfWidth(z, x < getStreamCenterX(z) ? -1 : 1);
+      centers.push(new THREE.Vector3(x, getTerrainHeight(x, z) + 0.012, z));
+      rippleMotion.set([Math.random(), 1 + Math.random() * 0.7, hidden ? 0 : 0.7 + Math.random() * 0.7], i * 3);
     }
-
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    return { eavesLineGeo: geo, eavesData: data };
-  }, [eavesDripCount]);
-
-  // 3. 落水涟漪扩散环
-  const rippleCount = 160;
-  const { rippleGeo, rippleData } = useMemo(() => {
-    const geo = new THREE.RingGeometry(0.02, 0.07, 18);
-    geo.rotateX(-Math.PI / 2);
-
-    const data: { x: number; z: number; scale: number; maxScale: number; speed: number }[] = [];
-    for (let i = 0; i < rippleCount; i++) {
-      data.push({
-        x: (Math.random() - 0.5) * 38,
-        z: (Math.random() - 0.5) * 38,
-        scale: Math.random() * 0.8,
-        maxScale: 0.7 + Math.random() * 0.7,
-        speed: 1.0 + Math.random() * 0.7,
-      });
-    }
-
-    return { rippleGeo: geo, rippleData: data };
-  }, [rippleCount]);
-
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-
-  // 帧动画循环
+    rippleGeometry.setAttribute('rippleMotion', new THREE.InstancedBufferAttribute(rippleMotion, 3));
+    const rippleMaterial = new THREE.MeshBasicMaterial({ color: '#9ec4b5', transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
+    rippleMaterial.onBeforeCompile = shader => {
+      shader.uniforms.rainTravel = travel;
+      shader.vertexShader = 'uniform float rainTravel; attribute vec3 rippleMotion; varying float rippleFade;\n' + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+        float life=fract(rippleMotion.x+rainTravel*rippleMotion.y);
+        rippleFade=(1.0-life)*(1.0-life);
+        vec3 transformed=position*(0.02+life)*rippleMotion.z;`);
+      shader.fragmentShader = 'varying float rippleFade;\n' + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.a*=rippleFade;');
+    };
+    rippleMaterial.customProgramCacheKey = () => 'gpu-ground-ripples-v1';
+    return { geometry, material, travel, windTravel, slant, rippleGeometry, rippleMaterial, centers };
+  }, []);
+  useLayoutEffect(() => {
+    const matrix = new THREE.Matrix4();
+    objects.centers.forEach((point, i) => { matrix.makeTranslation(point.x, point.y, point.z); rippleMesh.current!.setMatrixAt(i, matrix); });
+    rippleMesh.current!.instanceMatrix.needsUpdate = true;
+    rippleMesh.current!.computeBoundingSphere();
+  }, [objects]);
   useFrame((_, delta) => {
-    let speedMult = 1.0 * rainIntensity;
-    let slantX = -0.16;
-
-    if (rainType === 'light') {
-      speedMult = 0.65 * rainIntensity;
-      slantX = -0.10;
-    } else if (rainType === 'moderate') {
-      speedMult = 1.0 * rainIntensity;
-      slantX = -0.16;
-    } else if (rainType === 'heavy') {
-      speedMult = 1.35 * rainIntensity;
-      slantX = -0.22;
-    } else if (rainType === 'storm') {
-      speedMult = 1.8 * rainIntensity;
-      slantX = -0.32;
-    } else if (rainType === 'thunder') {
-      speedMult = 2.15 * rainIntensity;
-      slantX = -0.38;
-    }
-
-    // A. 更新雨丝倾泻
-    if (rainLinesRef.current) {
-      const positions = rainLinesRef.current.geometry.attributes.position.array as Float32Array;
-
-      for (let i = 0; i < rainStreakCount; i++) {
-        const item = rainData[i];
-        item.y -= item.speed * delta * speedMult;
-        item.x += slantX * item.speed * delta * speedMult;
-
-        const localX = Math.abs(item.x - PAVILION_POS[0]);
-        const localZ = Math.abs(item.z - PAVILION_POS[2]);
-        const radius = Math.max(localX, localZ) / 4.15;
-        const corner = Math.max(localX, localZ) > 0
-          ? Math.min(localX, localZ) / Math.max(localX, localZ) : 0;
-        const roofY = 3.6 + 1.9 * Math.pow(Math.max(0, 1 - radius), 1.45)
-          + Math.pow(radius, 5) * (0.07 + 0.2 * Math.pow(corner, 6));
-        if (item.y < 0.05 || (radius <= 1 && item.y < roofY + 0.03)) {
-          item.y = 22 + Math.random() * 3;
-          item.x = (Math.random() - 0.5) * 45;
-          item.z = (Math.random() - 0.5) * 45;
-        }
-
-        const idx = i * 6;
-        positions[idx] = item.x;
-        positions[idx + 1] = item.y;
-        positions[idx + 2] = item.z;
-
-        positions[idx + 3] = item.x - slantX * item.length;
-        positions[idx + 4] = item.y + item.length;
-        positions[idx + 5] = item.z;
-      }
-      rainLinesRef.current.geometry.attributes.position.needsUpdate = true;
-    }
-
-    // B. 更新屋檐滴水 (纯流线细短线段更新)
-    if (eavesLinesRef.current) {
-      const eavesPos = eavesLinesRef.current.geometry.attributes.position.array as Float32Array;
-      for (let i = 0; i < eavesDripCount; i++) {
-        const drop = eavesData[i];
-        drop.y -= drop.speed * delta * speedMult;
-        if (drop.y < 0.1) {
-          drop.y = drop.originY;
-        }
-
-        const idx = i * 6;
-        eavesPos[idx] = drop.x;
-        eavesPos[idx + 1] = drop.y;
-        eavesPos[idx + 2] = drop.z;
-
-        eavesPos[idx + 3] = drop.x;
-        eavesPos[idx + 4] = drop.y + drop.len;
-        eavesPos[idx + 5] = drop.z;
-      }
-      eavesLinesRef.current.geometry.attributes.position.needsUpdate = true;
-    }
-
-    // C. 更新落水涟漪
-    if (rippleMeshRef.current) {
-      rippleData.forEach((r, i) => {
-        r.scale += r.speed * delta * speedMult;
-        if (r.scale > r.maxScale) {
-          r.scale = 0.02;
-          r.x = (Math.random() - 0.5) * 38;
-          r.z = (Math.random() - 0.5) * 38;
-        }
-
-        dummy.position.set(r.x, getTerrainHeight(r.x, r.z) + 0.02, r.z);
-        const sheltered = Math.abs(r.x - PAVILION_POS[0]) < 4.15
-          && Math.abs(r.z - PAVILION_POS[2]) < 4.15;
-        const scale = sheltered ? 0 : r.scale;
-        dummy.scale.set(scale, 1, scale);
-        dummy.updateMatrix();
-        rippleMeshRef.current!.setMatrixAt(i, dummy.matrix);
-      });
-      rippleMeshRef.current.instanceMatrix.needsUpdate = true;
-    }
+    const weather = WEATHER[rainType], dt = Math.min(delta, 0.1) * weather.speed * intensity;
+    objects.travel.value += dt;
+    objects.windTravel.value += dt * weather.slant;
+    objects.slant.value = weather.slant;
+    objects.material.opacity = weather.opacity;
   });
-
-  return (
-    <group>
-      {/* 1. 真实全景倾斜细雨丝 (流线型 LineSegments，无方块) */}
-      <lineSegments ref={rainLinesRef} geometry={lineGeo}>
-        <lineBasicMaterial
-          color="#dbebe3"
-          transparent
-          opacity={
-            rainType === 'light'
-              ? 0.35
-              : rainType === 'moderate'
-              ? 0.52
-              : rainType === 'heavy'
-              ? 0.68
-              : rainType === 'storm'
-              ? 0.82
-              : 0.90
-          }
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </lineSegments>
-
-      {/* 2. 屋檐垂直滴水帘 (纯细短水丝，绝无白方块) */}
-      <lineSegments ref={eavesLinesRef} geometry={eavesLineGeo}>
-        <lineBasicMaterial
-          color="#e8f8f0"
-          transparent
-          opacity={0.65}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </lineSegments>
-
-      {/* 3. 动态落水涟漪 */}
-      <instancedMesh
-        ref={rippleMeshRef}
-        args={[rippleGeo, undefined, rippleCount]}
-      >
-        <meshBasicMaterial
-          color="#9ec4b5"
-          transparent
-          opacity={0.35}
-          depthWrite={false}
-          side={THREE.DoubleSide}
-        />
-      </instancedMesh>
-    </group>
-  );
+  useEffect(() => () => {
+    objects.geometry.dispose(); objects.material.dispose(); objects.rippleGeometry.dispose(); objects.rippleMaterial.dispose();
+  }, [objects]);
+  return <group>
+    <lineSegments geometry={objects.geometry} material={objects.material} frustumCulled={false} />
+    <instancedMesh ref={rippleMesh} args={[objects.rippleGeometry, objects.rippleMaterial, RIPPLE_COUNT]} />
+  </group>;
 };

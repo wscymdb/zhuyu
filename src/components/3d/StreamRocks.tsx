@@ -1,6 +1,7 @@
+import { useSceneTextures } from '../../utils/useSceneTextures';
 import React, { useMemo, useEffect } from 'react';
 import * as THREE from 'three';
-import { useTexture } from '@react-three/drei';
+
 import { useFrame } from '@react-three/fiber';
 import { STREAM_WATER_LEVEL } from '../../utils/terrain';
 import type { StreamDynamics } from '../../utils/streamDynamics';
@@ -70,7 +71,7 @@ function stoneMaterial(map: THREE.Texture, waterLevel: { value: number }) {
 }
 
 export const StreamRocks: React.FC<{rocks:StreamRock[];dynamics:React.MutableRefObject<StreamDynamics>}>=({rocks,dynamics})=>{
-  const textures=useTexture({stone:'/textures/rocks/river-stone-v1.png',moss:'/textures/rocks/moss-stone-v1.png'});
+  const textures=useSceneTextures({stone:'/textures/rocks/river-stone-v1.png',moss:'/textures/rocks/moss-stone-v1.png'});
   useEffect(()=>{
     Object.values(textures).forEach(texture=>{
       texture.colorSpace=THREE.SRGBColorSpace;
